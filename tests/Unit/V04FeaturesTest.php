@@ -89,7 +89,7 @@ it('emits a zoom transition', function () {
     $deck = v04Fixture();
     $deck['slides'][0]['transition'] = ['kind' => 'zoom', 'duration' => 400];
     $xml = v04SlideXml($deck, 'ppt/slides/slide1.xml');
-    expect($xml)->toContain('<p:zoom/>');
+    expect($xml)->toContain('<p:zoom dir="in"/>');
     expect($xml)->toContain('spd="med"'); // 250 < 400 < 700
 });
 

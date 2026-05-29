@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.4.1 — 2026-05-29
+
+### Fixed
+- Zoom slide transition now animates in PowerPoint: emit `<p:zoom dir="in"/>`
+  instead of a bare `<p:zoom/>`. PowerPoint silently ignores a zoom transition
+  with no in/out direction (same as `push` needing its `dir`).
+
 ## v0.4.0 — 2026-05-29
 
 A complete presentation: slide transitions, image fit/crop, native charts,

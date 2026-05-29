@@ -619,7 +619,7 @@ final class PptxWriter
      *
      *   fade  → `<p:fade/>`
      *   slide → `<p:push dir="l|r|u|d"/>` (a directional push)
-     *   zoom  → `<p:zoom/>`
+     *   zoom  → `<p:zoom dir="in"/>`
      *   none / unknown → omitted entirely
      *
      * Speed (`spd`) is derived from `duration` (ms): >=700 → slow,
@@ -649,7 +649,9 @@ final class PptxWriter
         $effect = match ($kind) {
             'fade' => '<p:fade/>',
             'slide' => '<p:push dir="' . $this->transitionDirection($spec['direction'] ?? null) . '"/>',
-            'zoom' => '<p:zoom/>',
+            // PowerPoint ignores a zoom transition with no in/out direction, so
+            // emit it explicitly (mirrors the push dir requirement above).
+            'zoom' => '<p:zoom dir="in"/>',
             default => '',
         };
         if ($effect === '') {
