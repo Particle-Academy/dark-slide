@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace DarkSlide\Writer;
 
+use DarkSlide\Helpers\ChartTranslator;
 use DarkSlide\Helpers\Color;
 use DarkSlide\Helpers\Emu;
 use DarkSlide\Helpers\MarkdownInline;
@@ -29,9 +30,10 @@ use ZipArchive;
  *   ppt/presentation.xml + _rels
  *   ppt/theme/theme1.xml
  *   ppt/slideMasters/slideMaster1.xml + _rels
- *   ppt/slideLayouts/slideLayout1.xml + _rels
+ *   ppt/slideLayouts/slideLayoutN.xml + _rels (one per recognised layout)
  *   ppt/slides/slideN.xml + _rels (one per deck slide)
  *   ppt/notesSlides/notesSlideN.xml + _rels (one per slide with notes)
+ *   ppt/charts/chartN.xml (one per chart element with a renderable option)
  *   ppt/media/imageN.* (referenced by image elements)
  *
  * Coordinates are converted from 0..1 fractions to EMU. Font sizes are
@@ -39,32 +41,74 @@ use ZipArchive;
  *
  * What gets written per element type:
  *   text   — `<p:sp>` with `<p:txBody>` containing styled paragraphs/runs
- *   image  — `<p:pic>` with the binary embedded as `ppt/media/imageN.*`
+ *   image  — `<p:pic>` honouring `fit` (fill / cover / contain /
+ *            scale-down) + explicit `crop`, binary embedded as
+ *            `ppt/media/imageN.*`
  *   shape  — `<p:sp>` with `<a:prstGeom>` preset geometry (rect,
  *            ellipse, triangle, line, arrow; rounded-rect uses rect
  *            with `prstGeom="roundRect"`)
- *   code   — text element with monospace font + dark fill (no syntax
- *            highlighting; v0.2 will render via Pygments/etc.)
- *   chart  — placeholder text "[chart: <kind>]" (v0.2 will emit real
- *            chart parts)
- *   table  — placeholder for v0.1 (v0.2 ships real `<a:tbl>`)
+ *   code   — syntax-highlighted monospace runs on a dark fill
+ *   chart  — native OOXML `ppt/charts/chartN.xml` (bar / line / area /
+ *            pie / scatter) referenced by a `<p:graphicFrame>`; falls
+ *            back to an embedded pre-render image or a titled placeholder
+ *            when the option isn't translatable
+ *   table  — real `<a:tbl>` (header + striped body rows)
  *   embed  — placeholder text "[embed: <src>]" (no PPTX equivalent)
  */
 final class PptxWriter
 {
+    /** Drawing-ML chart namespace, reused across chart parts. */
+    private const NS_CHART = 'http://schemas.openxmlformats.org/drawingml/2006/chart';
+
+    /**
+     * Slide layouts the writer ships, in registration order. Index + 1 is
+     * the slideLayoutN.xml number; the value is the deck `slide.layout`
+     * name. The first entry (`blank`) is the fallback.
+     *
+     * @var list<string>
+     */
+    private const LAYOUT_ORDER = [
+        'blank',
+        'title',
+        'title-content',
+        'two-column',
+        'section-divider',
+        'image-text',
+        'text-image',
+        'quote',
+    ];
+
+    /** Series fill palette (hex, no #) used when no theme accent is given. */
+    private const CHART_PALETTE = ['8B5CF6', 'EC4899', '06B6D4', 'F59E0B', '10B981', '3B82F6', 'EF4444', 'A855F7'];
+
     /** Counter for media file names. Reset per write(). */
     private int $mediaCounter = 0;
 
+    /** Counter for chart part file names. Reset per write(). */
+    private int $chartCounter = 0;
+
     /** Media files queued for the archive, keyed by archive path. */
     private array $mediaFiles = [];
+
+    /** Chart part XML queued for the archive, keyed by archive path. */
+    private array $chartFiles = [];
+
+    /** Accent hex (no #) pulled from the deck theme; drives chart series colors. */
+    private string $themeAccent = '8B5CF6';
 
     /**
      * Override the temp directory used while assembling the archive.
      * Defaults to {@see sys_get_temp_dir()}; callers running in
      * sandboxes / containers where that path isn't writable can pass
      * their own (e.g. `storage_path('app/tmp')` in Laravel).
+     *
+     * @param  bool  $allowHttpImages  When true, `http(s)://` image sources
+     *                                 are fetched via `file_get_contents` and
+     *                                 embedded. OFF by default — fetching
+     *                                 remote URLs is a security boundary the
+     *                                 caller must opt into.
      */
-    public function __construct(private ?string $tempDir = null)
+    public function __construct(private ?string $tempDir = null, private bool $allowHttpImages = false)
     {
     }
 
@@ -108,7 +152,11 @@ final class PptxWriter
     public function toBytes(array $deck): string
     {
         $this->mediaCounter = 0;
+        $this->chartCounter = 0;
         $this->mediaFiles = [];
+        $this->chartFiles = [];
+        $this->pendingSlideRels = [];
+        [$this->themeAccent] = Color::parse($deck['theme']['colors']['accent'] ?? '#8B5CF6', '8B5CF6');
 
         $slides = $deck['slides'] ?? [];
         $slideCount = count($slides);
@@ -140,14 +188,14 @@ final class PptxWriter
             $notesSlidesXml = [];
             foreach ($slides as $i => $slide) {
                 $oneBased = $i + 1;
-                $slidesXml[$oneBased] = $this->buildSlideXml($slide, $oneBased);
+                $slidesXml[$oneBased] = $this->buildSlideXml($slide, $oneBased, $deck);
                 if (!empty($slide['notes'])) {
                     $notesSlidesXml[$oneBased] = $this->buildNotesSlideXml($slide, $oneBased);
                 }
             }
 
             // 2. Top-level + ppt-level scaffolding.
-            $zip->addFromString('[Content_Types].xml', $this->buildContentTypes($slideCount, array_keys($notesSlidesXml)));
+            $zip->addFromString('[Content_Types].xml', $this->buildContentTypes($slideCount, array_keys($notesSlidesXml), array_keys($this->chartFiles)));
             $zip->addFromString('_rels/.rels', $this->buildTopRels());
             $zip->addFromString('docProps/core.xml', $this->buildCoreProps($deck));
             $zip->addFromString('docProps/app.xml', $this->buildAppProps($slideCount));
@@ -158,22 +206,33 @@ final class PptxWriter
             $zip->addFromString('ppt/theme/theme1.xml', $this->buildTheme($deck));
             $zip->addFromString('ppt/slideMasters/slideMaster1.xml', $this->buildSlideMaster());
             $zip->addFromString('ppt/slideMasters/_rels/slideMaster1.xml.rels', $this->buildSlideMasterRels());
-            $zip->addFromString('ppt/slideLayouts/slideLayout1.xml', $this->buildSlideLayout());
-            $zip->addFromString('ppt/slideLayouts/_rels/slideLayout1.xml.rels', $this->buildSlideLayoutRels());
 
-            // 3. Slide parts.
-            foreach ($slidesXml as $i => $xml) {
-                $zip->addFromString("ppt/slides/slide{$i}.xml", $xml);
-                $zip->addFromString("ppt/slides/_rels/slide{$i}.xml.rels", $this->buildSlideRels($i, isset($notesSlidesXml[$i])));
+            // 3. Slide layout parts — one per recognised layout.
+            foreach (self::LAYOUT_ORDER as $idx => $layoutName) {
+                $n = $idx + 1;
+                $zip->addFromString("ppt/slideLayouts/slideLayout{$n}.xml", $this->buildSlideLayout($layoutName));
+                $zip->addFromString("ppt/slideLayouts/_rels/slideLayout{$n}.xml.rels", $this->buildSlideLayoutRels());
             }
 
-            // 4. Notes slide parts (only for slides with notes).
+            // 4. Slide parts.
+            foreach ($slidesXml as $i => $xml) {
+                $layoutNum = $this->layoutNumberFor($slides[$i - 1]['layout'] ?? null);
+                $zip->addFromString("ppt/slides/slide{$i}.xml", $xml);
+                $zip->addFromString("ppt/slides/_rels/slide{$i}.xml.rels", $this->buildSlideRels($i, isset($notesSlidesXml[$i]), $layoutNum));
+            }
+
+            // 5. Notes slide parts (only for slides with notes).
             foreach ($notesSlidesXml as $i => $xml) {
                 $zip->addFromString("ppt/notesSlides/notesSlide{$i}.xml", $xml);
                 $zip->addFromString("ppt/notesSlides/_rels/notesSlide{$i}.xml.rels", $this->buildNotesSlideRels($i));
             }
 
-            // 5. Embedded media files.
+            // 6. Native chart parts.
+            foreach ($this->chartFiles as $archivePath => $chartXml) {
+                $zip->addFromString($archivePath, $chartXml);
+            }
+
+            // 7. Embedded media files.
             foreach ($this->mediaFiles as $archivePath => $bytes) {
                 $zip->addFromString($archivePath, $bytes);
             }
@@ -194,15 +253,28 @@ final class PptxWriter
 
     // ─── Top-level parts ───────────────────────────────────────────────────
 
-    private function buildContentTypes(int $slideCount, array $notesSlideIds): string
+    /**
+     * @param  list<int>  $notesSlideIds
+     * @param  list<string>  $chartParts  archive paths of emitted chart parts
+     */
+    private function buildContentTypes(int $slideCount, array $notesSlideIds, array $chartParts): string
     {
         $slideOverrides = '';
         for ($i = 1; $i <= $slideCount; $i++) {
             $slideOverrides .= '<Override PartName="/ppt/slides/slide' . $i . '.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>';
         }
+        $layoutOverrides = '';
+        foreach (self::LAYOUT_ORDER as $idx => $_) {
+            $n = $idx + 1;
+            $layoutOverrides .= '<Override PartName="/ppt/slideLayouts/slideLayout' . $n . '.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>';
+        }
         $notesOverrides = '';
         foreach ($notesSlideIds as $i) {
             $notesOverrides .= '<Override PartName="/ppt/notesSlides/notesSlide' . $i . '.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml"/>';
+        }
+        $chartOverrides = '';
+        foreach ($chartParts as $archivePath) {
+            $chartOverrides .= '<Override PartName="/' . $archivePath . '" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>';
         }
 
         // Extension defaults — covers our embedded image media. PNG / JPEG
@@ -222,10 +294,11 @@ final class PptxWriter
             . $extensionDefaults
             . '<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>'
             . '<Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>'
-            . '<Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>'
+            . $layoutOverrides
             . '<Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>'
             . $slideOverrides
             . $notesOverrides
+            . $chartOverrides
             . '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
             . '<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>'
             . '</Types>';
@@ -263,7 +336,7 @@ final class PptxWriter
         return Xml::declaration()
             . '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">'
             . '<Application>DarkSlide</Application>'
-            . '<AppVersion>0.3.0</AppVersion>'
+            . '<AppVersion>0.4.0</AppVersion>'
             . "<Slides>{$slideCount}</Slides>"
             . '</Properties>';
     }
@@ -315,9 +388,19 @@ final class PptxWriter
         [$bg, ] = Color::parse($colors['background'] ?? '#FFFFFF', 'FFFFFF');
         [$text, ] = Color::parse($colors['text'] ?? '#0F172A', '0F172A');
         [$accent, ] = Color::parse($colors['accent'] ?? '#8B5CF6', '8B5CF6');
+        // `muted` maps to the secondary dark (dk2 → headings / chart axes);
+        // `surface` maps to the secondary light (lt2 → panel fills). Both
+        // fall back to the classic Office values when the deck omits them.
+        [$muted, ] = Color::parse($colors['muted'] ?? '#44546A', '44546A');
+        [$surface, ] = Color::parse($colors['surface'] ?? '#E7E6E6', 'E7E6E6');
 
         $heading = Xml::attr((string) ($deck['theme']['fonts']['heading'] ?? 'Calibri'));
         $body = Xml::attr((string) ($deck['theme']['fonts']['body'] ?? 'Calibri'));
+
+        // Derive a small accent ramp from the deck accent so accent1..6 stay
+        // coherent with the brand instead of Office's stock rainbow.
+        $palette = self::CHART_PALETTE;
+        $palette[0] = $accent;
 
         return Xml::declaration()
             . '<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="DarkSlide">'
@@ -325,14 +408,14 @@ final class PptxWriter
             . '<a:clrScheme name="DarkSlide">'
             . '<a:dk1><a:srgbClr val="' . $text . '"/></a:dk1>'
             . '<a:lt1><a:srgbClr val="' . $bg . '"/></a:lt1>'
-            . '<a:dk2><a:srgbClr val="44546A"/></a:dk2>'
-            . '<a:lt2><a:srgbClr val="E7E6E6"/></a:lt2>'
-            . '<a:accent1><a:srgbClr val="' . $accent . '"/></a:accent1>'
-            . '<a:accent2><a:srgbClr val="ED7D31"/></a:accent2>'
-            . '<a:accent3><a:srgbClr val="A5A5A5"/></a:accent3>'
-            . '<a:accent4><a:srgbClr val="FFC000"/></a:accent4>'
-            . '<a:accent5><a:srgbClr val="5B9BD5"/></a:accent5>'
-            . '<a:accent6><a:srgbClr val="70AD47"/></a:accent6>'
+            . '<a:dk2><a:srgbClr val="' . $muted . '"/></a:dk2>'
+            . '<a:lt2><a:srgbClr val="' . $surface . '"/></a:lt2>'
+            . '<a:accent1><a:srgbClr val="' . $palette[0] . '"/></a:accent1>'
+            . '<a:accent2><a:srgbClr val="' . $palette[1] . '"/></a:accent2>'
+            . '<a:accent3><a:srgbClr val="' . $palette[2] . '"/></a:accent3>'
+            . '<a:accent4><a:srgbClr val="' . $palette[3] . '"/></a:accent4>'
+            . '<a:accent5><a:srgbClr val="' . $palette[4] . '"/></a:accent5>'
+            . '<a:accent6><a:srgbClr val="' . $palette[5] . '"/></a:accent6>'
             . '<a:hlink><a:srgbClr val="0563C1"/></a:hlink>'
             . '<a:folHlink><a:srgbClr val="954F72"/></a:folHlink>'
             . '</a:clrScheme>'
@@ -363,7 +446,7 @@ final class PptxWriter
             . '</p:spTree>'
             . '</p:cSld>'
             . '<p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/>'
-            . '<p:sldLayoutIdLst><p:sldLayoutId id="2147483649" r:id="rId1"/></p:sldLayoutIdLst>'
+            . '<p:sldLayoutIdLst>' . $this->buildSlideLayoutIdLst() . '</p:sldLayoutIdLst>'
             . '<p:txStyles>'
             . '<p:titleStyle><a:lvl1pPr algn="ctr"><a:defRPr sz="4400"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill></a:defRPr></a:lvl1pPr></p:titleStyle>'
             . '<p:bodyStyle><a:lvl1pPr><a:defRPr sz="2400"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill></a:defRPr></a:lvl1pPr></p:bodyStyle>'
@@ -372,28 +455,94 @@ final class PptxWriter
             . '</p:sldMaster>';
     }
 
+    /**
+     * Build the master's `<p:sldLayoutId>` entries — one per layout, each
+     * pointing at its rels (`rId1`..`rIdN`); the theme rel comes last.
+     */
+    private function buildSlideLayoutIdLst(): string
+    {
+        $out = '';
+        foreach (self::LAYOUT_ORDER as $idx => $_) {
+            $n = $idx + 1;
+            $id = 2147483648 + $n; // master uses 2147483648; layouts follow
+            $out .= '<p:sldLayoutId id="' . $id . '" r:id="rId' . $n . '"/>';
+        }
+
+        return $out;
+    }
+
     private function buildSlideMasterRels(): string
     {
+        $rels = '';
+        foreach (self::LAYOUT_ORDER as $idx => $_) {
+            $n = $idx + 1;
+            $rels .= '<Relationship Id="rId' . $n . '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout' . $n . '.xml"/>';
+        }
+        $themeRid = 'rId' . (count(self::LAYOUT_ORDER) + 1);
+        $rels .= '<Relationship Id="' . $themeRid . '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="../theme/theme1.xml"/>';
+
         return Xml::declaration()
             . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            . '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>'
-            . '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="../theme/theme1.xml"/>'
+            . $rels
             . '</Relationships>';
     }
 
-    private function buildSlideLayout(): string
+    /**
+     * Map a deck `slide.layout` name to its 1-based slideLayoutN number.
+     * Unknown / missing layouts fall back to `blank` (layout 1).
+     */
+    private function layoutNumberFor(?string $layout): int
     {
+        if ($layout === null) {
+            return 1;
+        }
+        $idx = array_search($layout, self::LAYOUT_ORDER, true);
+
+        return $idx === false ? 1 : $idx + 1;
+    }
+
+    /**
+     * Map a deck layout name to the closest OOXML slide-layout `type=`.
+     * The geometry is irrelevant here — elements are placed absolutely on
+     * the slide — but the type lets PowerPoint's "Reset" / layout picker
+     * recognise the slide's role.
+     */
+    private function layoutTypeFor(string $layout): string
+    {
+        return match ($layout) {
+            'title' => 'title',
+            'title-content' => 'obj',
+            'two-column' => 'twoObj',
+            'section-divider' => 'secHead',
+            'image-text', 'text-image' => 'picTx',
+            'quote' => 'obj',
+            default => 'blank',
+        };
+    }
+
+    /**
+     * Build one slideLayout part. Layouts ship empty shape trees — DarkSlide
+     * places every element absolutely on the slide itself, so layouts exist
+     * purely to give PowerPoint the right theme/reset affordance and a
+     * recognisable layout `type`.
+     */
+    private function buildSlideLayout(string $layout): string
+    {
+        $type = $this->layoutTypeFor($layout);
+        $name = Xml::attr(ucwords(str_replace('-', ' ', $layout)));
+
         return Xml::declaration()
             . '<p:sldLayout xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
             . 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
             . 'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
-            . 'type="blank" preserve="1">'
-            . '<p:cSld name="Blank">'
+            . 'type="' . $type . '" preserve="1">'
+            . '<p:cSld name="' . $name . '">'
             . '<p:spTree>'
             . '<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>'
             . '<p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>'
             . '</p:spTree>'
             . '</p:cSld>'
+            . '<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>'
             . '</p:sldLayout>';
     }
 
@@ -410,7 +559,7 @@ final class PptxWriter
     /**
      * @param  array<string, mixed>  $slide
      */
-    private function buildSlideXml(array $slide, int $slideNumber): string
+    private function buildSlideXml(array $slide, int $slideNumber, array $deck = []): string
     {
         $elements = $slide['elements'] ?? [];
         // Z-order: elements without `z` keep their array order; explicit z overrides.
@@ -443,6 +592,8 @@ final class PptxWriter
         // Persist the rels for buildSlideRels() to merge with the notes rel.
         $this->pendingSlideRels[$slideNumber] = $slideRels;
 
+        $transition = $this->buildTransition($slide['transition'] ?? null, $deck['theme']['defaultTransition'] ?? null);
+
         return Xml::declaration()
             . '<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
             . 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
@@ -455,11 +606,90 @@ final class PptxWriter
             . $shapeTreeXml
             . '</p:spTree>'
             . '</p:cSld>'
+            . $transition
             . '</p:sld>';
     }
 
     /** Accumulated per-slide rels keyed by 1-based slide number. */
     private array $pendingSlideRels = [];
+
+    /**
+     * Build the `<p:transition>` for a slide. Maps the deck's terse
+     * transition spec to drawingML transition effects:
+     *
+     *   fade  → `<p:fade/>`
+     *   slide → `<p:push dir="l|r|u|d"/>` (a directional push)
+     *   zoom  → `<p:zoom/>`
+     *   none / unknown → omitted entirely
+     *
+     * Speed (`spd`) is derived from `duration` (ms): >=700 → slow,
+     * <=250 → fast, otherwise med. When the slide has no transition the
+     * deck-level `theme.defaultTransition` is used as a fallback.
+     *
+     * @param  mixed  $transition  the slide's `transition` spec, if any
+     * @param  mixed  $fallback  the deck's `theme.defaultTransition`, if any
+     */
+    private function buildTransition(mixed $transition, mixed $fallback): string
+    {
+        $spec = is_array($transition) ? $transition : null;
+        if ($spec === null || ($spec['kind'] ?? null) === null || ($spec['kind'] ?? null) === 'none') {
+            $spec = is_array($fallback) ? $fallback : null;
+        }
+        if ($spec === null) {
+            return '';
+        }
+
+        $kind = is_string($spec['kind'] ?? null) ? strtolower((string) $spec['kind']) : 'none';
+        if ($kind === 'none' || !in_array($kind, Schema::SLIDE_TRANSITION_KINDS, true)) {
+            return '';
+        }
+
+        $spd = $this->transitionSpeed($spec['duration'] ?? null);
+
+        $effect = match ($kind) {
+            'fade' => '<p:fade/>',
+            'slide' => '<p:push dir="' . $this->transitionDirection($spec['direction'] ?? null) . '"/>',
+            'zoom' => '<p:zoom/>',
+            default => '',
+        };
+        if ($effect === '') {
+            return '';
+        }
+
+        return '<p:transition spd="' . $spd . '">' . $effect . '</p:transition>';
+    }
+
+    /** Derive PPTX transition speed (`spd`) from a duration in milliseconds. */
+    private function transitionSpeed(mixed $duration): string
+    {
+        if (!is_numeric($duration)) {
+            return 'med';
+        }
+        $ms = (float) $duration;
+        if ($ms >= 700) {
+            return 'slow';
+        }
+        if ($ms <= 250) {
+            return 'fast';
+        }
+
+        return 'med';
+    }
+
+    /**
+     * Map a deck transition direction to a drawingML push direction
+     * (`l` / `r` / `u` / `d`). Defaults to `l` (push from the right).
+     */
+    private function transitionDirection(mixed $direction): string
+    {
+        return match (is_string($direction) ? strtolower($direction) : '') {
+            'left' => 'l',
+            'right' => 'r',
+            'up' => 'u',
+            'down' => 'd',
+            default => 'l',
+        };
+    }
 
     /**
      * Build the slide background XML. Three shapes are supported:
@@ -664,7 +894,7 @@ final class PptxWriter
             'image' => $this->buildImageShape($element, $shapeId, $slideNumber, $rels),
             'shape' => $this->buildShape($element, $shapeId),
             'code' => $this->buildCodeShape($element, $shapeId),
-            'chart' => $this->buildPlaceholder('[chart]', $element, $shapeId),
+            'chart' => $this->buildChart($element, $shapeId, $slideNumber, $rels),
             'table' => $this->buildTable($element, $shapeId),
             'embed' => $this->buildPlaceholder('[embed: ' . (string) ($element['src'] ?? '') . ']', $element, $shapeId),
             default => '',
@@ -698,6 +928,19 @@ final class PptxWriter
     }
 
     /**
+     * Build a `<p:pic>` honouring the element's `fit` + `crop`.
+     *
+     * The box is `x/y/w/h`; how the image lands in it depends on `fit`:
+     *
+     *   fill (default)       — stretch to the box (`<a:stretch>`)
+     *   cover                — fill the box, centre-crop the overflowing
+     *                          axis via `<a:srcRect>`
+     *   contain / scale-down — preserve aspect inside the box: shrink
+     *                          the off/ext to the fitted (letterboxed)
+     *                          rect; no crop
+     *   explicit `crop`      — `{x,y,w,h}` (0..1 of source) → `<a:srcRect>`,
+     *                          takes precedence over `fit`
+     *
      * @param  array<string, mixed>  $element
      * @param  list<array{id: string, type: string, target: string}>  $rels  populated with the embedded-image relationship.
      */
@@ -716,9 +959,37 @@ final class PptxWriter
             'target' => $embed['target'],
         ];
 
-        $xfrm = $this->xfrmFromFractions($element);
         $id = $element['id'] ?? "image-{$shapeId}";
         $alt = Xml::attr((string) ($element['alt'] ?? ''));
+        $fit = is_string($element['fit'] ?? null) ? strtolower((string) $element['fit']) : 'fill';
+
+        // Box geometry in EMU.
+        $boxX = Emu::fromFracX((float) ($element['x'] ?? 0));
+        $boxY = Emu::fromFracY((float) ($element['y'] ?? 0));
+        $boxW = max(1, Emu::fromFracX((float) ($element['w'] ?? 0)));
+        $boxH = max(1, Emu::fromFracY((float) ($element['h'] ?? 0)));
+
+        // Intrinsic dimensions (best effort — null when undeterminable).
+        $intrinsic = @getimagesizefromstring($embed['bytes']);
+        $imgW = is_array($intrinsic) ? (int) ($intrinsic[0] ?? 0) : 0;
+        $imgH = is_array($intrinsic) ? (int) ($intrinsic[1] ?? 0) : 0;
+
+        $offX = $boxX;
+        $offY = $boxY;
+        $extW = $boxW;
+        $extH = $boxH;
+        $srcRect = '';
+
+        $explicitCrop = $this->imageCropRect($element['crop'] ?? null);
+        if ($explicitCrop !== null) {
+            $srcRect = $explicitCrop;
+        } elseif ($fit === 'cover' && $imgW > 0 && $imgH > 0) {
+            $srcRect = $this->coverSrcRect($boxW, $boxH, $imgW, $imgH);
+        } elseif (($fit === 'contain' || $fit === 'scale-down') && $imgW > 0 && $imgH > 0) {
+            [$offX, $offY, $extW, $extH] = $this->containedRect($boxX, $boxY, $boxW, $boxH, $imgW, $imgH);
+        }
+
+        $blipFill = '<p:blipFill><a:blip r:embed="' . $relId . '"/>' . $srcRect . '<a:stretch><a:fillRect/></a:stretch></p:blipFill>';
 
         return '<p:pic>'
             . '<p:nvPicPr>'
@@ -726,12 +997,88 @@ final class PptxWriter
             . '<p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr>'
             . '<p:nvPr/>'
             . '</p:nvPicPr>'
-            . '<p:blipFill><a:blip r:embed="' . $relId . '"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>'
+            . $blipFill
             . '<p:spPr>'
-            . $xfrm
+            . '<a:xfrm><a:off x="' . $offX . '" y="' . $offY . '"/><a:ext cx="' . $extW . '" cy="' . $extH . '"/></a:xfrm>'
             . '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>'
             . '</p:spPr>'
             . '</p:pic>';
+    }
+
+    /**
+     * Build an `<a:srcRect>` for an explicit crop `{x,y,w,h}` (0..1 of the
+     * source). Insets are in thousandths-of-percent (100% = 100000).
+     * Returns null when the crop isn't a usable rectangle.
+     *
+     * @param  mixed  $crop
+     */
+    private function imageCropRect(mixed $crop): ?string
+    {
+        if (!is_array($crop)) {
+            return null;
+        }
+        $x = isset($crop['x']) && is_numeric($crop['x']) ? (float) $crop['x'] : null;
+        $y = isset($crop['y']) && is_numeric($crop['y']) ? (float) $crop['y'] : null;
+        $w = isset($crop['w']) && is_numeric($crop['w']) ? (float) $crop['w'] : null;
+        $h = isset($crop['h']) && is_numeric($crop['h']) ? (float) $crop['h'] : null;
+        if ($x === null || $y === null || $w === null || $h === null) {
+            return null;
+        }
+        $l = (int) round($x * 100000);
+        $t = (int) round($y * 100000);
+        $r = (int) round((1 - $x - $w) * 100000);
+        $b = (int) round((1 - $y - $h) * 100000);
+        $l = max(0, min(100000, $l));
+        $t = max(0, min(100000, $t));
+        $r = max(0, min(100000, $r));
+        $b = max(0, min(100000, $b));
+
+        return '<a:srcRect l="' . $l . '" t="' . $t . '" r="' . $r . '" b="' . $b . '"/>';
+    }
+
+    /**
+     * Build the centre-crop `<a:srcRect>` for `fit: cover`. The image fills
+     * the box; whichever axis overflows is cropped equally on both sides.
+     */
+    private function coverSrcRect(int $boxW, int $boxH, int $imgW, int $imgH): string
+    {
+        $boxAspect = $boxW / $boxH;
+        $imgAspect = $imgW / $imgH;
+        $l = $t = $r = $b = 0;
+
+        if ($imgAspect > $boxAspect) {
+            // Image is wider than the box — crop left/right.
+            $visibleFrac = $boxAspect / $imgAspect;
+            $inset = (int) round((1 - $visibleFrac) / 2 * 100000);
+            $l = $inset;
+            $r = $inset;
+        } elseif ($imgAspect < $boxAspect) {
+            // Image is taller than the box — crop top/bottom.
+            $visibleFrac = $imgAspect / $boxAspect;
+            $inset = (int) round((1 - $visibleFrac) / 2 * 100000);
+            $t = $inset;
+            $b = $inset;
+        }
+
+        return '<a:srcRect l="' . $l . '" t="' . $t . '" r="' . $r . '" b="' . $b . '"/>';
+    }
+
+    /**
+     * Compute the letterboxed off/ext (in EMU) for `fit: contain` /
+     * `scale-down`: the image is scaled to fit entirely inside the box,
+     * preserving aspect, and centred.
+     *
+     * @return array{0: int, 1: int, 2: int, 3: int}  [offX, offY, extW, extH]
+     */
+    private function containedRect(int $boxX, int $boxY, int $boxW, int $boxH, int $imgW, int $imgH): array
+    {
+        $scale = min($boxW / $imgW, $boxH / $imgH);
+        $extW = max(1, (int) round($imgW * $scale));
+        $extH = max(1, (int) round($imgH * $scale));
+        $offX = $boxX + (int) round(($boxW - $extW) / 2);
+        $offY = $boxY + (int) round(($boxH - $extH) / 2);
+
+        return [$offX, $offY, $extW, $extH];
     }
 
     /** @param array<string, mixed> $element */
@@ -945,6 +1292,447 @@ final class PptxWriter
             . '</a:tc>';
     }
 
+    // ─── Charts ───────────────────────────────────────────────────────────
+
+    /**
+     * Build a chart element. The happy path translates the ECharts-style
+     * `option` into a native OOXML chart part (`ppt/charts/chartN.xml`)
+     * referenced by a `<p:graphicFrame>`. When the option can't be
+     * translated (no recognisable series / categories, or an unsupported
+     * series type) it falls back, in order, to:
+     *
+     *   1. a pre-rendered `image` / `src` data-URI on the element, embedded
+     *      as a `<p:pic>`;
+     *   2. a tidy titled placeholder box.
+     *
+     * Never throws — a chart it can't model degrades gracefully.
+     *
+     * @param  array<string, mixed>  $element
+     * @param  list<array{id: string, type: string, target: string}>  $rels
+     */
+    private function buildChart(array $element, int $shapeId, int $slideNumber, array &$rels): string
+    {
+        $option = is_array($element['option'] ?? null) ? $element['option'] : null;
+        $spec = $option !== null ? ChartTranslator::translate($option) : null;
+
+        if ($spec !== null) {
+            $this->chartCounter++;
+            $n = $this->chartCounter;
+            $archivePath = "ppt/charts/chart{$n}.xml";
+            $this->chartFiles[$archivePath] = $this->buildChartPart($spec);
+
+            $relId = 'rIdChart' . $n;
+            $rels[] = [
+                'id' => $relId,
+                'type' => 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart',
+                'target' => "../charts/chart{$n}.xml",
+            ];
+
+            return $this->buildChartFrame($element, $shapeId, $relId);
+        }
+
+        // Fallback 1: a pre-rendered chart image on the element.
+        $preRender = $this->chartPreRenderSrc($element);
+        if ($preRender !== null) {
+            $imageElement = $element;
+            $imageElement['src'] = $preRender;
+            $imageElement['fit'] = $element['fit'] ?? 'contain';
+
+            return $this->buildImageShape($imageElement, $shapeId, $slideNumber, $rels);
+        }
+
+        // Fallback 2: a titled placeholder box.
+        $title = '';
+        if (is_array($option)) {
+            $title = (string) ($option['title']['text'] ?? '');
+        }
+        $label = $title !== '' ? $title : 'chart';
+
+        return $this->buildChartPlaceholder($label, $element, $shapeId);
+    }
+
+    /**
+     * Pull a pre-rendered chart image data-URI off the element, if present.
+     * Accepts `image` or `src` carrying a `data:` URI.
+     *
+     * @param  array<string, mixed>  $element
+     */
+    private function chartPreRenderSrc(array $element): ?string
+    {
+        foreach (['image', 'src'] as $key) {
+            $value = $element[$key] ?? null;
+            if (is_string($value) && str_starts_with($value, 'data:')) {
+                return $value;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Build the `<p:graphicFrame>` that hosts a native chart part, placed at
+     * the element's x/y/w/h.
+     *
+     * @param  array<string, mixed>  $element
+     */
+    private function buildChartFrame(array $element, int $shapeId, string $relId): string
+    {
+        $xfrm = $this->xfrmFromFractions($element);
+        $innerXfrm = substr($xfrm, strlen('<a:xfrm>'), -strlen('</a:xfrm>'));
+        $id = $element['id'] ?? "chart-{$shapeId}";
+
+        return '<p:graphicFrame>'
+            . '<p:nvGraphicFramePr>'
+            . '<p:cNvPr id="' . $shapeId . '" name="' . Xml::attr((string) $id) . '"/>'
+            . '<p:cNvGraphicFramePr/>'
+            . '<p:nvPr/>'
+            . '</p:nvGraphicFramePr>'
+            . '<p:xfrm>' . $innerXfrm . '</p:xfrm>'
+            . '<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+            . '<a:graphicData uri="' . self::NS_CHART . '">'
+            . '<c:chart xmlns:c="' . self::NS_CHART . '" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="' . $relId . '"/>'
+            . '</a:graphicData>'
+            . '</a:graphic>'
+            . '</p:graphicFrame>';
+    }
+
+    /**
+     * Build a complete `ppt/charts/chartN.xml` part from a normalised chart
+     * spec. Uses literal caches (`<c:strLit>` / `<c:numLit>`) so no embedded
+     * workbook is required.
+     *
+     * @param  array{kind: string, title: string, categories: list<string>, series: list<array<string, mixed>>}  $spec
+     */
+    private function buildChartPart(array $spec): string
+    {
+        $kind = $spec['kind'];
+        $plot = match ($kind) {
+            'bar' => $this->buildBarChartXml($spec),
+            'line' => $this->buildLineChartXml($spec),
+            'pie' => $this->buildPieChartXml($spec),
+            'scatter' => $this->buildScatterChartXml($spec),
+            default => $this->buildBarChartXml($spec),
+        };
+
+        if ($spec['title'] !== '') {
+            $title = '<c:title><c:tx><c:rich><a:bodyPr/><a:p><a:r><a:t>' . Xml::text($spec['title']) . '</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title><c:autoTitleDeleted val="0"/>';
+        } else {
+            $title = '<c:autoTitleDeleted val="1"/>';
+        }
+
+        return Xml::declaration()
+            . '<c:chartSpace xmlns:c="' . self::NS_CHART . '" '
+            . 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+            . 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+            . '<c:chart>'
+            . $title
+            . '<c:plotArea>'
+            . '<c:layout/>'
+            . $plot
+            . '</c:plotArea>'
+            . '<c:legend><c:legendPos val="b"/><c:overlay val="0"/></c:legend>'
+            . '<c:plotVisOnly val="1"/>'
+            . '<c:dispBlanksAs val="gap"/>'
+            . '</c:chart>'
+            . '</c:chartSpace>';
+    }
+
+    /**
+     * @param  array{categories: list<string>, series: list<array<string, mixed>>}  $spec
+     */
+    private function buildBarChartXml(array $spec): string
+    {
+        $sers = '';
+        foreach ($spec['series'] as $idx => $series) {
+            $sers .= '<c:ser>'
+                . '<c:idx val="' . $idx . '"/>'
+                . '<c:order val="' . $idx . '"/>'
+                . $this->chartSeriesName($series, $idx)
+                . $this->chartSeriesFill($idx)
+                . $this->chartCatRef($spec['categories'], $series['values'])
+                . $this->chartValRef($series['values'])
+                . '</c:ser>';
+        }
+
+        return '<c:barChart>'
+            . '<c:barDir val="col"/>'
+            . '<c:grouping val="clustered"/>'
+            . '<c:varyColors val="0"/>'
+            . $sers
+            . '<c:axId val="111111111"/>'
+            . '<c:axId val="222222222"/>'
+            . '</c:barChart>'
+            . $this->buildCatValAxes();
+    }
+
+    /**
+     * @param  array{categories: list<string>, series: list<array<string, mixed>>}  $spec
+     */
+    private function buildLineChartXml(array $spec): string
+    {
+        // Promote to an area chart when any series carries an areaStyle.
+        $isArea = false;
+        foreach ($spec['series'] as $series) {
+            if (!empty($series['area'])) {
+                $isArea = true;
+                break;
+            }
+        }
+
+        $sers = '';
+        foreach ($spec['series'] as $idx => $series) {
+            $smooth = (!$isArea && !empty($series['smooth'])) ? '<c:smooth val="1"/>' : '';
+            $sers .= '<c:ser>'
+                . '<c:idx val="' . $idx . '"/>'
+                . '<c:order val="' . $idx . '"/>'
+                . $this->chartSeriesName($series, $idx)
+                . $this->chartSeriesLine($idx)
+                . $this->chartCatRef($spec['categories'], $series['values'])
+                . $this->chartValRef($series['values'])
+                . $smooth
+                . '</c:ser>';
+        }
+
+        if ($isArea) {
+            return '<c:areaChart>'
+                . '<c:grouping val="standard"/>'
+                . '<c:varyColors val="0"/>'
+                . $sers
+                . '<c:axId val="111111111"/>'
+                . '<c:axId val="222222222"/>'
+                . '</c:areaChart>'
+                . $this->buildCatValAxes();
+        }
+
+        return '<c:lineChart>'
+            . '<c:grouping val="standard"/>'
+            . '<c:varyColors val="0"/>'
+            . $sers
+            . '<c:marker val="1"/>'
+            . '<c:axId val="111111111"/>'
+            . '<c:axId val="222222222"/>'
+            . '</c:lineChart>'
+            . $this->buildCatValAxes();
+    }
+
+    /**
+     * Pie charts carry a single series; each data point gets its own
+     * colored `<c:dPt>` so slices read distinctly.
+     *
+     * @param  array{categories: list<string>, series: list<array<string, mixed>>}  $spec
+     */
+    private function buildPieChartXml(array $spec): string
+    {
+        $series = $spec['series'][0] ?? ['values' => [], 'name' => ''];
+        $values = is_array($series['values'] ?? null) ? $series['values'] : [];
+        $categories = $spec['categories'];
+
+        $dPts = '';
+        foreach ($values as $idx => $_) {
+            $dPts .= '<c:dPt>'
+                . '<c:idx val="' . $idx . '"/>'
+                . '<c:bubble3D val="0"/>'
+                . '<c:spPr><a:solidFill><a:srgbClr val="' . $this->chartColor($idx) . '"/></a:solidFill></c:spPr>'
+                . '</c:dPt>';
+        }
+
+        return '<c:pieChart>'
+            . '<c:varyColors val="1"/>'
+            . '<c:ser>'
+            . '<c:idx val="0"/>'
+            . '<c:order val="0"/>'
+            . $this->chartSeriesName($series, 0)
+            . $dPts
+            . $this->chartCatRef($categories, $values)
+            . $this->chartValRef($values)
+            . '</c:ser>'
+            . '<c:firstSliceAng val="0"/>'
+            . '</c:pieChart>';
+    }
+
+    /**
+     * @param  array{series: list<array<string, mixed>>}  $spec
+     */
+    private function buildScatterChartXml(array $spec): string
+    {
+        $sers = '';
+        foreach ($spec['series'] as $idx => $series) {
+            $points = is_array($series['points'] ?? null) ? $series['points'] : [];
+            $xs = [];
+            $ys = [];
+            foreach ($points as $point) {
+                $xs[] = (float) ($point['x'] ?? 0);
+                $ys[] = (float) ($point['y'] ?? 0);
+            }
+            $sers .= '<c:ser>'
+                . '<c:idx val="' . $idx . '"/>'
+                . '<c:order val="' . $idx . '"/>'
+                . $this->chartSeriesName($series, $idx)
+                . '<c:spPr><a:ln w="19050"><a:noFill/></a:ln></c:spPr>'
+                . '<c:marker><c:symbol val="circle"/><c:size val="6"/><c:spPr><a:solidFill><a:srgbClr val="' . $this->chartColor($idx) . '"/></a:solidFill></c:spPr></c:marker>'
+                . '<c:xVal>' . $this->numLit($xs) . '</c:xVal>'
+                . '<c:yVal>' . $this->numLit($ys) . '</c:yVal>'
+                . '</c:ser>';
+        }
+
+        return '<c:scatterChart>'
+            . '<c:scatterStyle val="lineMarker"/>'
+            . '<c:varyColors val="0"/>'
+            . $sers
+            . '<c:axId val="111111111"/>'
+            . '<c:axId val="222222222"/>'
+            . '</c:scatterChart>'
+            . '<c:valAx><c:axId val="111111111"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/><c:crossAx val="222222222"/></c:valAx>'
+            . '<c:valAx><c:axId val="222222222"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="l"/><c:crossAx val="111111111"/></c:valAx>';
+    }
+
+    /** Category + value axis pair shared by bar / line / area charts. */
+    private function buildCatValAxes(): string
+    {
+        return '<c:catAx>'
+            . '<c:axId val="111111111"/>'
+            . '<c:scaling><c:orientation val="minMax"/></c:scaling>'
+            . '<c:delete val="0"/>'
+            . '<c:axPos val="b"/>'
+            . '<c:crossAx val="222222222"/>'
+            . '</c:catAx>'
+            . '<c:valAx>'
+            . '<c:axId val="222222222"/>'
+            . '<c:scaling><c:orientation val="minMax"/></c:scaling>'
+            . '<c:delete val="0"/>'
+            . '<c:axPos val="l"/>'
+            . '<c:crossAx val="111111111"/>'
+            . '</c:valAx>';
+    }
+
+    /**
+     * Build the `<c:tx>` series-name node. Falls back to "Series N".
+     *
+     * @param  array<string, mixed>  $series
+     */
+    private function chartSeriesName(array $series, int $idx): string
+    {
+        $name = is_string($series['name'] ?? null) && $series['name'] !== ''
+            ? (string) $series['name']
+            : 'Series ' . ($idx + 1);
+
+        return '<c:tx><c:strRef><c:f>Sheet1!$A$' . ($idx + 1) . '</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>' . Xml::text($name) . '</c:v></c:pt></c:strCache></c:strRef></c:tx>';
+    }
+
+    /** Solid-fill `<c:spPr>` for a bar/area series, colored from the palette. */
+    private function chartSeriesFill(int $idx): string
+    {
+        return '<c:spPr><a:solidFill><a:srgbClr val="' . $this->chartColor($idx) . '"/></a:solidFill></c:spPr>';
+    }
+
+    /** Line `<c:spPr>` for a line/area series, colored from the palette. */
+    private function chartSeriesLine(int $idx): string
+    {
+        return '<c:spPr><a:ln w="28575"><a:solidFill><a:srgbClr val="' . $this->chartColor($idx) . '"/></a:solidFill></a:ln></c:spPr>';
+    }
+
+    /**
+     * Category reference (`<c:cat>`) as a string literal cache. When there
+     * are no categories, synthesises index labels so the cache point count
+     * matches the value count (PowerPoint dislikes mismatches).
+     *
+     * @param  list<string>  $categories
+     * @param  list<float>  $values
+     */
+    private function chartCatRef(array $categories, array $values): string
+    {
+        if ($categories === []) {
+            $categories = [];
+            foreach (array_keys($values) as $i) {
+                $categories[] = (string) ($i + 1);
+            }
+        }
+
+        $pts = '';
+        foreach ($categories as $i => $label) {
+            $pts .= '<c:pt idx="' . $i . '"><c:v>' . Xml::text((string) $label) . '</c:v></c:pt>';
+        }
+
+        return '<c:cat><c:strLit><c:ptCount val="' . count($categories) . '"/>' . $pts . '</c:strLit></c:cat>';
+    }
+
+    /**
+     * Value reference (`<c:val>`) as a numeric literal cache.
+     *
+     * @param  list<float>  $values
+     */
+    private function chartValRef(array $values): string
+    {
+        return '<c:val>' . $this->numLit($values) . '</c:val>';
+    }
+
+    /**
+     * Numeric literal cache (`<c:numLit>`) shared by val / xVal / yVal.
+     *
+     * @param  list<float>  $values
+     */
+    private function numLit(array $values): string
+    {
+        $pts = '';
+        foreach ($values as $i => $value) {
+            $pts .= '<c:pt idx="' . $i . '"><c:v>' . $this->numStr((float) $value) . '</c:v></c:pt>';
+        }
+
+        return '<c:numLit><c:formatCode>General</c:formatCode><c:ptCount val="' . count($values) . '"/>' . $pts . '</c:numLit>';
+    }
+
+    /** Render a float without a trailing `.0` / locale separators. */
+    private function numStr(float $value): string
+    {
+        if ($value === floor($value) && abs($value) < 1.0e15) {
+            return (string) (int) $value;
+        }
+
+        return rtrim(rtrim(sprintf('%.6F', $value), '0'), '.');
+    }
+
+    /** Pick a series color: accent for the first series, palette thereafter. */
+    private function chartColor(int $idx): string
+    {
+        if ($idx === 0) {
+            return $this->themeAccent;
+        }
+        $palette = self::CHART_PALETTE;
+
+        return $palette[$idx % count($palette)];
+    }
+
+    /**
+     * Build a tidy titled placeholder box for an untranslatable chart — a
+     * rounded rect with a tinted fill and the chart title / "chart" label.
+     *
+     * @param  array<string, mixed>  $element
+     */
+    private function buildChartPlaceholder(string $label, array $element, int $shapeId): string
+    {
+        $xfrm = $this->xfrmFromFractions($element);
+        $id = $element['id'] ?? "chart-{$shapeId}";
+
+        return '<p:sp>'
+            . '<p:nvSpPr>'
+            . '<p:cNvPr id="' . $shapeId . '" name="' . Xml::attr((string) $id) . '"/>'
+            . '<p:cNvSpPr/>'
+            . '<p:nvPr/>'
+            . '</p:nvSpPr>'
+            . '<p:spPr>'
+            . $xfrm
+            . '<a:prstGeom prst="roundRect"><a:avLst/></a:prstGeom>'
+            . '<a:solidFill><a:srgbClr val="F1F5F9"/></a:solidFill>'
+            . '<a:ln w="12700"><a:solidFill><a:srgbClr val="CBD5E1"/></a:solidFill></a:ln>'
+            . '</p:spPr>'
+            . '<p:txBody>'
+            . '<a:bodyPr wrap="square" anchor="ctr" rtlCol="0"/>'
+            . '<a:lstStyle/>'
+            . '<a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1600" b="1"><a:solidFill><a:srgbClr val="64748B"/></a:solidFill></a:rPr><a:t>' . Xml::text($label) . '</a:t></a:r></a:p>'
+            . '</p:txBody>'
+            . '</p:sp>';
+    }
+
     /** @param array<string, mixed> $element */
     private function buildPlaceholder(string $label, array $element, int $shapeId): string
     {
@@ -1125,7 +1913,7 @@ final class PptxWriter
     // ─── Media staging ────────────────────────────────────────────────────
 
     /**
-     * @return array{relId: string, target: string}|null
+     * @return array{relId: string, target: string, bytes: string}|null
      */
     private function stageMedia(string $src, int $slideNumber): ?array
     {
@@ -1146,6 +1934,7 @@ final class PptxWriter
         return [
             'relId' => $relId,
             'target' => "../media/image{$i}.{$ext}",
+            'bytes' => $data['bytes'],
         ];
     }
 
@@ -1190,10 +1979,34 @@ final class PptxWriter
             return ['bytes' => $bytes, 'mime' => $this->guessMimeFromPath($src)];
         }
 
-        // http(s) URLs are NOT auto-fetched — that's a security boundary
-        // we leave to the caller. Returning null falls back to a text
-        // placeholder.
+        // http(s) URLs are fetched only when the caller opted in via the
+        // `allowHttpImages` flag — fetching remote URLs is a security
+        // boundary. When OFF, returning null falls back to a placeholder.
+        if ($this->allowHttpImages && preg_match('#^https?://#i', $src) === 1) {
+            $bytes = @file_get_contents($src);
+            if ($bytes === false || $bytes === '') {
+                return null;
+            }
+
+            return ['bytes' => $bytes, 'mime' => $this->guessMimeFromBytes($bytes, $src)];
+        }
+
         return null;
+    }
+
+    /**
+     * Best-effort MIME detection for fetched bytes: inspect the decoded
+     * image header, falling back to the URL extension.
+     */
+    private function guessMimeFromBytes(string $bytes, string $src): string
+    {
+        $info = @getimagesizefromstring($bytes);
+        if (is_array($info) && isset($info['mime']) && is_string($info['mime'])) {
+            return $info['mime'];
+        }
+        $path = parse_url($src, PHP_URL_PATH);
+
+        return is_string($path) ? $this->guessMimeFromPath($path) : 'image/png';
     }
 
     private function guessMimeFromPath(string $path): string
@@ -1224,11 +2037,11 @@ final class PptxWriter
 
     // ─── Slide rels ───────────────────────────────────────────────────────
 
-    private function buildSlideRels(int $slideNumber, bool $hasNotes): string
+    private function buildSlideRels(int $slideNumber, bool $hasNotes, int $layoutNumber = 1): string
     {
         $rels = '';
-        // Required: slide → layout.
-        $rels .= '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>';
+        // Required: slide → layout (the one matching the slide's layout).
+        $rels .= '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout' . $layoutNumber . '.xml"/>';
         $nextRelNum = 2;
 
         // Optional: slide → notesSlide.

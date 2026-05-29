@@ -1,5 +1,65 @@
 # Changelog
 
+## v0.4.0 — 2026-05-29
+
+A complete presentation: slide transitions, image fit/crop, native charts,
+and pptx theme + layout styling.
+
+### Slide transitions
+- New optional `slide.transition` — `{ kind: none|fade|slide|zoom,
+  duration?: ms, direction?: left|right|up|down }`. Emits a real
+  `<p:transition>` per slide: `fade` → `<p:fade/>`, `slide` →
+  `<p:push dir="l|r|u|d"/>`, `zoom` → `<p:zoom/>`. Speed (`spd`) derives
+  from `duration` (>=700 slow / <=250 fast / else med). Falls back to
+  `theme.defaultTransition` when a slide has none; `none` is omitted.
+
+### Images — fit + crop
+- `fit` is now honoured. `fill` (default) stretches; `cover` fills the box
+  and centre-crops the overflowing axis via a computed `<a:srcRect>`;
+  `contain` / `scale-down` letterbox inside the box (shrunk `<a:off>`/
+  `<a:ext>`, no crop). Intrinsic dimensions read via
+  `getimagesizefromstring`.
+- Explicit `crop: {x,y,w,h}` (0..1 of source) → `<a:srcRect>` in
+  thousandths-of-percent; takes precedence over `fit`.
+- Opt-in HTTP(S) image fetch — `new PptxWriter($tempDir, allowHttpImages:
+  true)` or `Agent::write($deck, $path, ['allowHttpImages' => true])`.
+  OFF by default (security boundary); when OFF, remote URLs keep the
+  text-placeholder fallback.
+
+### Charts — native OOXML chart parts
+- `chart` elements now emit a real `ppt/charts/chartN.xml` part referenced
+  by a `<p:graphicFrame>`, with the `[Content_Types].xml` override + slide
+  relationship wired up. New pure-PHP `ChartTranslator` reads an ECharts-
+  style `option` (categories from `xAxis.data` / `xAxis[0].data` /
+  `categories`; series from `series[]`).
+- Series types: `bar` → `<c:barChart>`, `line` → `<c:lineChart>`
+  (honours `smooth`), `line` + `areaStyle` → `<c:areaChart>`, `pie` →
+  `<c:pieChart>` (colored `<c:dPt>` slices), `scatter` →
+  `<c:scatterChart>`. Literal caches (`<c:strLit>` / `<c:numLit>`) — no
+  embedded workbook required. Series colored from the theme accent + a
+  small palette.
+- Graceful fallback: an untranslatable / unsupported option embeds a
+  pre-rendered `image` / `src` data-URI as a picture, else a tidy titled
+  placeholder box. Never crashes.
+
+### Theme + layouts
+- `theme1.xml` maps `theme.colors` into the clrScheme more sensibly
+  (`muted` → dk2, `surface` → lt2, accent ramp from `accent`) and
+  `theme.fonts` into major/minor fonts.
+- Ships all 8 real `slideLayoutN.xml` parts (blank / title / title-content
+  / two-column / section-divider / image-text / text-image / quote) with
+  the right `type=`, registered in the master's `<p:sldLayoutIdLst>` and
+  content types. Each slide references the layout matching its
+  `slide.layout` (falls back to blank). Elements stay absolutely placed —
+  layouts drive PowerPoint's theme/reset UI, not re-flow.
+
+### Testing
+- 39 Pest cases / 151 assertions, all green (was 23). New v0.4 cases cover
+  transition emission (push/fade/zoom), image cover `<a:srcRect>`, contain
+  letterbox, explicit crop, a well-formed bar chart with the right `<c:ser>`
+  count, pie chart, untranslatable-chart fallback, the 8 layout parts, and
+  per-slide layout references.
+
 ## v0.3.0 — 2026-05-26
 
 Markdown headings, syntax-highlighted code, and reader fidelity for the

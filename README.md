@@ -84,18 +84,26 @@ write.
 
 See [`docs/schema.md`](./docs/schema.md) for the full reference.
 
-## Element coverage (v0.3)
+## Element coverage (v0.4)
 
 | Element | Writer | Reader |
 |---|:-:|:-:|
 | text   | ✅ markdown spans + headings (`# / ## / ###`) | ✅ markdown spans reconstructed |
-| image  | ✅ (data URI + local path) | ✅ as data URI |
+| image  | ✅ data URI + local path; `fit` (fill/cover/contain/scale-down) + `crop`; opt-in HTTP fetch | ✅ as data URI |
 | shape  | ✅ (rect, rounded-rect, ellipse, triangle, line, arrow) | ✅ |
 | code   | ✅ syntax-highlighted runs (JS/TS, PHP, JSON, bash, CSS, Python, HTML) | ✅ as text |
 | table  | ✅ real `<a:tbl>` (header + striped body rows) | ✅ round-trips columns + rows |
 | background | ✅ solid color, gradient (`linear-gradient(…)`), image | ✅ solid, gradient, image-as-data-URI |
-| chart  | placeholder (renders as text fallback) — real chart parts on the v0.4 roadmap | ⚠ skipped |
+| chart  | ✅ native OOXML chart parts (bar / line / area / pie / scatter) from an ECharts-style `option`; graceful image / placeholder fallback | ⚠ skipped |
 | embed  | not representable in pptx | n/a |
+| transitions | ✅ per-slide `transition` (fade / slide / zoom) + deck `defaultTransition` | ⚠ skipped |
+
+### What's new in v0.4
+
+- **Slide transitions**. Add `transition: { kind, duration?, direction? }` to a slide (`fade` / `slide` / `zoom`), or a deck-wide `theme.defaultTransition`.
+- **Image fit + crop**. `fit` is honoured (`fill` / `cover` centre-crop / `contain` & `scale-down` letterbox) and an explicit `crop: {x,y,w,h}` maps to `<a:srcRect>`. Opt-in remote fetch via `Agent::write($deck, $path, ['allowHttpImages' => true])` (off by default).
+- **Native charts**. `chart` elements emit real `ppt/charts/chartN.xml` parts (no embedded workbook — literal caches) translated from an Apache ECharts-style `option`. Unsupported options fall back to a pre-rendered image or a titled placeholder.
+- **Theme + layouts**. `theme.colors` / `theme.fonts` map into the pptx clrScheme + fontScheme, and all 8 layouts ship as real `slideLayoutN.xml` parts so PowerPoint recognises each slide's layout role.
 
 ### What's new in v0.3
 

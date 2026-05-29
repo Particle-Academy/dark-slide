@@ -71,12 +71,20 @@ final class Agent
      * Write a deck to disk as a PPTX file. Throws SchemaException on
      * unrecoverable validation errors.
      *
+     * Options:
+     *   - `tempDir` (string): override the temp dir used to assemble the
+     *     archive (for hosts where the system temp isn't writable).
+     *   - `allowHttpImages` (bool, default false): when true, `http(s)://`
+     *     image sources are fetched and embedded. Off by default — fetching
+     *     remote URLs is a security boundary the caller must opt into.
+     *
      * @param  array<string, mixed>  $deck
+     * @param  array{tempDir?: ?string, allowHttpImages?: bool}  $options
      * @return array{path: string, bytes: int, slides: int}
      *
      * @throws SchemaException
      */
-    public static function write(array $deck, string $path): array
+    public static function write(array $deck, string $path, array $options = []): array
     {
         $errors = self::validate($deck);
         if (!empty($errors)) {
@@ -86,18 +94,19 @@ final class Agent
             );
         }
 
-        return (new PptxWriter())->write($deck, $path);
+        return self::makeWriter($options)->write($deck, $path);
     }
 
     /**
      * Return the PPTX bytes for a deck (no temp file). Same validation
-     * semantics as {@see write()}.
+     * semantics + options as {@see write()}.
      *
      * @param  array<string, mixed>  $deck
+     * @param  array{tempDir?: ?string, allowHttpImages?: bool}  $options
      *
      * @throws SchemaException
      */
-    public static function toBytes(array $deck): string
+    public static function toBytes(array $deck, array $options = []): string
     {
         $errors = self::validate($deck);
         if (!empty($errors)) {
@@ -107,7 +116,20 @@ final class Agent
             );
         }
 
-        return (new PptxWriter())->toBytes($deck);
+        return self::makeWriter($options)->toBytes($deck);
+    }
+
+    /**
+     * Construct a writer from the shared options array.
+     *
+     * @param  array{tempDir?: ?string, allowHttpImages?: bool}  $options
+     */
+    private static function makeWriter(array $options): PptxWriter
+    {
+        return new PptxWriter(
+            $options['tempDir'] ?? null,
+            (bool) ($options['allowHttpImages'] ?? false),
+        );
     }
 
     /**

@@ -48,6 +48,12 @@ final class Schema
     /** Text format options. */
     public const TEXT_FORMATS = ['markdown', 'html', 'plain'];
 
+    /** Slide transition kinds the writer recognises. Unknown kinds fall back to none. */
+    public const SLIDE_TRANSITION_KINDS = ['none', 'fade', 'slide', 'zoom'];
+
+    /** Directions accepted by directional transitions (slide/push). */
+    public const SLIDE_TRANSITION_DIRECTIONS = ['left', 'right', 'up', 'down'];
+
     /** Default slide width in EMU (English Metric Units) for 16:9 at 10". 914400 EMU = 1 inch. */
     public const DEFAULT_SLIDE_WIDTH_EMU = 9144000;
     public const DEFAULT_SLIDE_HEIGHT_EMU = 5143500;
@@ -148,6 +154,14 @@ final class Schema
                                     'image' => ['type' => 'string'],
                                     'imageFit' => ['type' => 'string', 'enum' => ['contain', 'cover', 'fill']],
                                     'gradient' => ['type' => 'string'],
+                                ],
+                            ],
+                            'transition' => [
+                                'type' => 'object',
+                                'properties' => [
+                                    'kind' => ['type' => 'string', 'enum' => self::SLIDE_TRANSITION_KINDS],
+                                    'duration' => ['type' => 'number'],
+                                    'direction' => ['type' => 'string', 'enum' => self::SLIDE_TRANSITION_DIRECTIONS],
                                 ],
                             ],
                             'notes' => ['type' => 'string'],

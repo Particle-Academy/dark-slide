@@ -17,7 +17,7 @@ use RuntimeException;
  */
 final class DarkSlide
 {
-    public const VERSION = '0.3.0';
+    public const VERSION = '0.4.0';
 
     /**
      * @param  string|null  $tempDir  Optional override for the temp directory used while
@@ -28,8 +28,11 @@ final class DarkSlide
      *                                system temp isn't writable (e.g. PHP's
      *                                built-in dev server on some Windows
      *                                profiles) still work.
+     * @param  bool  $allowHttpImages  When true, `http(s)://` image sources are
+     *                                 fetched and embedded. Off by default —
+     *                                 fetching remote URLs is a security boundary.
      */
-    public function __construct(private ?string $tempDir = null)
+    public function __construct(private ?string $tempDir = null, private bool $allowHttpImages = false)
     {
     }
 
@@ -65,7 +68,7 @@ final class DarkSlide
     {
         $this->throwIfInvalid($deck);
 
-        return (new PptxWriter($this->tempDir))->write($deck, $path);
+        return (new PptxWriter($this->tempDir, $this->allowHttpImages))->write($deck, $path);
     }
 
     /**
@@ -77,7 +80,7 @@ final class DarkSlide
     {
         $this->throwIfInvalid($deck);
 
-        return (new PptxWriter($this->tempDir))->toBytes($deck);
+        return (new PptxWriter($this->tempDir, $this->allowHttpImages))->toBytes($deck);
     }
 
     /**
