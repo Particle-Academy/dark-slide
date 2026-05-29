@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.5.1 — 2026-05-29
+
+### Schema — keep lockstep with fancy-slides
+
+- Accept an optional `element.href` (whole-element hyperlink) in the schema /
+  validator so it survives `validateAndRepair` and round-trips through the deck
+  JSON. Mirrors `fancy-slides` `ElementBase.href` (added in fancy-slides 0.9.0).
+  The writer does not yet emit `<a:hlinkClick>` for it — whole-element href is
+  carried in the deck JSON for the host, while inline links inside text via
+  markdown `[label](url)` continue to export as real hyperlinks.
+
 ## v0.5.0 — 2026-05-29
 
 ### Element entrance animations → OOXML `<p:timing>`

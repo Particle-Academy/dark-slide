@@ -208,6 +208,9 @@ final class Schema
                 'z' => ['type' => 'integer'],
                 'locked' => ['type' => 'boolean'],
                 'hidden' => ['type' => 'boolean'],
+                // Whole-element hyperlink — emitted as an <a:hlinkClick> on the
+                // shape / picture. Mirrors fancy-slides ElementBase.href.
+                'href' => ['type' => 'string'],
                 // Type-specific fields — kept loose since this is a union.
                 'content' => ['type' => 'string'],
                 'format' => ['type' => 'string', 'enum' => self::TEXT_FORMATS],
