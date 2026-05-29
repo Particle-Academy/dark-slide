@@ -619,7 +619,10 @@ final class PptxWriter
      *
      *   fade  → `<p:fade/>`
      *   slide → `<p:push dir="l|r|u|d"/>` (a directional push)
-     *   zoom  → `<p:zoom dir="in"/>`
+     *   zoom  → `<p:circle/>` (an iris grow-from-centre — PowerPoint has no
+     *           native zoom slide transition; the legacy `<p:zoom>` was dropped
+     *           from the render engine, so circle is the closest effect that
+     *           actually animates)
      *   none / unknown → omitted entirely
      *
      * Speed (`spd`) is derived from `duration` (ms): >=700 → slow,
@@ -649,9 +652,9 @@ final class PptxWriter
         $effect = match ($kind) {
             'fade' => '<p:fade/>',
             'slide' => '<p:push dir="' . $this->transitionDirection($spec['direction'] ?? null) . '"/>',
-            // PowerPoint ignores a zoom transition with no in/out direction, so
-            // emit it explicitly (mirrors the push dir requirement above).
-            'zoom' => '<p:zoom dir="in"/>',
+            // No native zoom transition survives in modern PowerPoint; an iris
+            // circle grow-from-centre is the closest effect that animates.
+            'zoom' => '<p:circle/>',
             default => '',
         };
         if ($effect === '') {

@@ -1,11 +1,18 @@
 # Changelog
 
+## v0.4.2 — 2026-05-29
+
+### Fixed
+- `zoom` transition now actually animates. Modern PowerPoint dropped the legacy
+  `<p:zoom>` transition from its render engine entirely (the 0.4.1 `dir="in"`
+  attempt still didn't play), so `zoom` now maps to `<p:circle/>` — an iris
+  grow-from-centre, the closest effect to a zoom that reliably animates.
+
 ## v0.4.1 — 2026-05-29
 
 ### Fixed
-- Zoom slide transition now animates in PowerPoint: emit `<p:zoom dir="in"/>`
-  instead of a bare `<p:zoom/>`. PowerPoint silently ignores a zoom transition
-  with no in/out direction (same as `push` needing its `dir`).
+- Attempted zoom fix via `<p:zoom dir="in"/>` (superseded by 0.4.2 — modern
+  PowerPoint does not render `<p:zoom>` at all).
 
 ## v0.4.0 — 2026-05-29
 
