@@ -573,7 +573,14 @@ final class PptxWriter
 
         $bg = $this->buildBackground($slide['background'] ?? null, $slideNumber, $slideRels);
 
-        foreach ($elements as $element) {
+        // Builds collected for the `<p:timing>` tree: each animated element
+        // paired with the shape id actually assigned to its `<p:cNvPr>`. We
+        // capture the id here (rather than recomputing it) so the timing tree's
+        // `<p:spTgt spid>` always matches the emitted shape, even as the
+        // shape-id counter skips elements that render to nothing.
+        $animatedBuilds = [];
+
+        foreach ($elements as $arrayIndex => $element) {
             if (!is_array($element) || !isset($element['type'])) {
                 continue;
             }
@@ -586,6 +593,31 @@ final class PptxWriter
             }
             $shapeTreeXml .= $xml;
             $slideRels = array_merge($slideRels, $rels);
+
+            if (isset($element['animation']) && is_array($element['animation']) && isset($element['animation']['effect'])) {
+                // "By paragraph" builds only make sense for text elements: we
+                // count the paragraphs the SAME way buildTextBody() splits the
+                // content into `<a:p>` (a plain explode on "\n"), so paragraph
+                // index i in the timing tree lines up with `<a:p>` index i in
+                // the emitted `<p:txBody>`. Anything else (non-text, or text
+                // without byParagraph) keeps a null paragraph count → one
+                // whole-shape build node, exactly as before.
+                $paragraphCount = null;
+                if (
+                    ($element['type'] ?? null) === 'text'
+                    && !empty($element['animation']['byParagraph'])
+                ) {
+                    $paragraphCount = count(explode("\n", (string) ($element['content'] ?? '')));
+                }
+
+                $animatedBuilds[] = [
+                    'shapeId' => $shapeId,
+                    'arrayIndex' => $arrayIndex,
+                    'animation' => $element['animation'],
+                    'paragraphCount' => $paragraphCount,
+                ];
+            }
+
             $shapeId++;
         }
 
@@ -593,7 +625,10 @@ final class PptxWriter
         $this->pendingSlideRels[$slideNumber] = $slideRels;
 
         $transition = $this->buildTransition($slide['transition'] ?? null, $deck['theme']['defaultTransition'] ?? null);
+        $timing = $this->buildTiming($animatedBuilds);
 
+        // CT_Slide child order is cSld, clrMapOvr, transition, timing — so the
+        // timing node must come LAST, after any transition.
         return Xml::declaration()
             . '<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
             . 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
@@ -607,6 +642,7 @@ final class PptxWriter
             . '</p:spTree>'
             . '</p:cSld>'
             . $transition
+            . $timing
             . '</p:sld>';
     }
 
@@ -694,6 +730,478 @@ final class PptxWriter
             'down' => 'd',
             default => 'l',
         };
+    }
+
+    // ─── Element entrance animations (`<p:timing>`) ───────────────────────────
+
+    /** drawingML `<p:cTn>` id counter, reset per slide timing tree. */
+    private int $tnId = 0;
+
+    /**
+     * Build the slide's `<p:timing>` tree from the animated builds captured
+     * while emitting the shape tree. Returns '' when there are no animations
+     * (so non-animated slides emit no timing node at all).
+     *
+     * The shape of the tree mirrors what PowerPoint authors when you add
+     * entrance effects, and the build grouping mirrors fancy-slides'
+     * `buildSteps()`:
+     *
+     *   - Animated builds are stable-sorted by `(order ?? 0)` then array index.
+     *   - A "by paragraph" text build (captured with a non-null
+     *     `paragraphCount`) is expanded in place into ONE sub-build per
+     *     paragraph, each scoped to a single `<a:p>` via a paragraph-range
+     *     target. The element's FIRST paragraph keeps the element's trigger
+     *     (relative to prior builds); every later paragraph becomes its own
+     *     `on-click` step (one line per click). Non-byParagraph builds expand
+     *     to a single whole-shape sub-build (`paragraph = null`), unchanged.
+     *   - The first sub-build and every `on-click` sub-build start a NEW click
+     *     step (its step `<p:cTn>` waits on `<p:cond delay="indefinite"/>`).
+     *   - `with-prev` attaches to the current step's par with begin delay 0.
+     *   - `after-prev` attaches with begin delay = the previous build's
+     *     duration (so it starts when the previous build finishes).
+     *
+     * Tree skeleton:
+     *   <p:timing><p:tnLst>
+     *     <p:par><p:cTn nodeType="tmRoot">
+     *       <p:childTnLst><p:seq concurrent="1" nextAc="seek" nodeType="mainSeq">
+     *         <p:cTn nodeType="mainSeq"><p:childTnLst>
+     *           <p:par> ... one per click step ... </p:par>
+     *         </p:childTnLst></p:cTn>
+     *         <p:prevCondLst>/<p:nextCondLst> (click advance)
+     *       </p:seq></p:childTnLst>
+     *     </p:cTn></p:par>
+     *   </p:tnLst></p:timing>
+     *
+     * @param  list<array{shapeId: int, arrayIndex: int, animation: array<string, mixed>, paragraphCount?: int|null}>  $builds
+     */
+    private function buildTiming(array $builds): string
+    {
+        if ($builds === []) {
+            return '';
+        }
+
+        // Stable sort by (order ?? 0) then original array index.
+        usort($builds, static function (array $a, array $b): int {
+            $ao = isset($a['animation']['order']) && is_numeric($a['animation']['order']) ? (float) $a['animation']['order'] : 0.0;
+            $bo = isset($b['animation']['order']) && is_numeric($b['animation']['order']) ? (float) $b['animation']['order'] : 0.0;
+            if ($ao !== $bo) {
+                return $ao <=> $bo;
+            }
+
+            return $a['arrayIndex'] <=> $b['arrayIndex'];
+        });
+
+        // Expand each element-level build into the sub-builds that actually
+        // contribute timing nodes. A whole-shape build → one sub-build
+        // (`paragraph = null`). A by-paragraph text build → one sub-build per
+        // paragraph (`paragraph = 0..N-1`), each targeting a single `<a:p>`.
+        // The element's first paragraph keeps its trigger so it slots into the
+        // sequence where `order` placed it; every later paragraph is forced to
+        // its own `on-click` step (one line revealed per click).
+        /** @var list<array{shapeId: int, arrayIndex: int, animation: array<string, mixed>, paragraph: int|null}> $subBuilds */
+        $subBuilds = [];
+        foreach ($builds as $build) {
+            $paragraphCount = $build['paragraphCount'] ?? null;
+            if ($paragraphCount === null || $paragraphCount <= 1) {
+                // Whole-shape build, OR a by-paragraph element with a single
+                // paragraph (no point splitting): keep one node. A single
+                // paragraph still scopes to its `<a:p>` when byParagraph is set.
+                $subBuilds[] = [
+                    'shapeId' => $build['shapeId'],
+                    'arrayIndex' => $build['arrayIndex'],
+                    'animation' => $build['animation'],
+                    'paragraph' => $paragraphCount === null ? null : 0,
+                ];
+
+                continue;
+            }
+
+            for ($i = 0; $i < $paragraphCount; $i++) {
+                $animation = $build['animation'];
+                if ($i > 0) {
+                    // Subsequent lines each get their own click.
+                    $animation['trigger'] = 'on-click';
+                }
+                $subBuilds[] = [
+                    'shapeId' => $build['shapeId'],
+                    'arrayIndex' => $build['arrayIndex'],
+                    'animation' => $animation,
+                    'paragraph' => $i,
+                ];
+            }
+        }
+
+        // Group into click steps.
+        /** @var list<list<array{shapeId: int, arrayIndex: int, animation: array<string, mixed>, paragraph: int|null}>> $steps */
+        $steps = [];
+        foreach ($subBuilds as $build) {
+            $trigger = $this->animationTrigger($build['animation']['trigger'] ?? null);
+            if ($steps === [] || $trigger === 'on-click') {
+                $steps[] = [$build];
+            } else {
+                $steps[count($steps) - 1][] = $build;
+            }
+        }
+
+        $this->tnId = 1; // tmRoot takes id 1 conventionally
+        $rootId = $this->tnId++;
+
+        // Entrance builds (presetClass="entr") make PowerPoint pre-hide their
+        // targets before the first paint, so NO separate load-time hide node is
+        // emitted — that approach flashed (the slide painted, then the hide ran
+        // a frame later). Each build's visibility `<p:set>` reveals its target
+        // when it fires; by-paragraph builds keep their pRg-scoped reveal.
+        $stepPars = '';
+        foreach ($steps as $step) {
+            $stepPars .= $this->buildStepPar($step);
+        }
+
+        $mainSeqId = $this->tnId++;
+
+        return '<p:timing>'
+            . '<p:tnLst>'
+            . '<p:par>'
+            . '<p:cTn id="' . $rootId . '" dur="indefinite" restart="never" nodeType="tmRoot">'
+            . '<p:childTnLst>'
+            . '<p:seq concurrent="1" nextAc="seek">'
+            . '<p:cTn id="' . $mainSeqId . '" dur="indefinite" nodeType="mainSeq">'
+            . '<p:childTnLst>'
+            . $stepPars
+            . '</p:childTnLst>'
+            . '</p:cTn>'
+            . '<p:prevCondLst><p:cond evt="onPrev" delay="0"><p:tgtEl><p:sldTgt/></p:tgtEl></p:cond></p:prevCondLst>'
+            . '<p:nextCondLst><p:cond evt="onNext" delay="0"><p:tgtEl><p:sldTgt/></p:tgtEl></p:cond></p:nextCondLst>'
+            . '</p:seq>'
+            . '</p:childTnLst>'
+            . '</p:cTn>'
+            . '</p:par>'
+            . '</p:tnLst>'
+            . '</p:timing>';
+    }
+
+    /**
+     * Build the `<p:tgtEl>` for an entrance behavior. When `$paragraph` is
+     * null the whole shape is targeted (`<p:spTgt spid="N"/>`); when it is a
+     * paragraph index the target is scoped to that single `<a:p>` via a
+     * paragraph range (`st = end = i` selects exactly paragraph i):
+     *
+     *   <p:tgtEl><p:spTgt spid="N"><p:txEl><p:pRg st="i" end="i"/></p:txEl></p:spTgt></p:tgtEl>
+     *
+     * The paragraph index matches `<a:p>` index i in the shape's `<p:txBody>`
+     * because both come from the same `explode("\n", content)` split.
+     */
+    private function buildTargetEl(int $spid, ?int $paragraph): string
+    {
+        if ($paragraph === null) {
+            return '<p:tgtEl><p:spTgt spid="' . $spid . '"/></p:tgtEl>';
+        }
+
+        return '<p:tgtEl><p:spTgt spid="' . $spid . '">'
+            . '<p:txEl><p:pRg st="' . $paragraph . '" end="' . $paragraph . '"/></p:txEl>'
+            . '</p:spTgt></p:tgtEl>';
+    }
+
+    /**
+     * Build one click-step `<p:par>`. The step `<p:cTn>` waits for a click
+     * (`<p:cond delay="indefinite"/>`); each build inside fires according to
+     * its trigger. The lead build keeps its own delay; `with-prev` followers
+     * start with the lead (delay 0 + own), `after-prev` followers start after
+     * the lead's duration.
+     *
+     * @param  list<array{shapeId: int, arrayIndex: int, animation: array<string, mixed>, paragraph: int|null}>  $step
+     */
+    private function buildStepPar(array $step): string
+    {
+        $lead = $step[0];
+        $leadDelay = $this->animationDelay($lead['animation']);
+        $leadDuration = $this->animationDuration($lead['animation']);
+
+        $childTns = '';
+        foreach ($step as $i => $build) {
+            if ($i === 0) {
+                $begin = $leadDelay;
+            } else {
+                $trigger = $this->animationTrigger($build['animation']['trigger'] ?? null);
+                // with-prev → simultaneous with the lead; after-prev → after it.
+                $base = $trigger === 'after-prev' ? $leadDelay + $leadDuration : $leadDelay;
+                $begin = $base + $this->animationDelay($build['animation']);
+            }
+            $childTns .= $this->buildEffectPar($build, $begin);
+        }
+
+        $stepId = $this->tnId++;
+
+        return '<p:par>'
+            . '<p:cTn id="' . $stepId . '" fill="hold">'
+            . '<p:stCondLst><p:cond delay="indefinite"/></p:stCondLst>'
+            . '<p:childTnLst>'
+            . $childTns
+            . '</p:childTnLst>'
+            . '</p:cTn>'
+            . '</p:par>';
+    }
+
+    /**
+     * Build the effect `<p:par>` for a single build: a wrapper par that begins
+     * after `$begin` ms, containing the visibility `<p:set>` (hidden→visible)
+     * plus the effect node (`<p:animEffect>` / `<p:anim>`), all targeting the
+     * build's shape id.
+     *
+     * @param  array{shapeId: int, arrayIndex: int, animation: array<string, mixed>, paragraph: int|null}  $build
+     * @param  int  $beginMs  begin offset for the effect, in milliseconds
+     */
+    private function buildEffectPar(array $build, int $beginMs): string
+    {
+        $spid = $build['shapeId'];
+        $paragraph = $build['paragraph'];
+        $animation = $build['animation'];
+        $effect = $this->animationEffect($animation['effect'] ?? null);
+        $duration = $this->animationDuration($animation);
+        $direction = $this->animationDirection($animation['direction'] ?? null);
+
+        $wrapId = $this->tnId++;
+
+        // The wrapper par begins (relative to its parent click step) after
+        // `$beginMs`. PowerPoint expresses this as a `<p:cond delay="...">`.
+        $stCond = '<p:stCondLst><p:cond delay="' . max(0, $beginMs) . '"/></p:stCondLst>';
+
+        $effectXml = match ($effect) {
+            'fly-in' => $this->buildFlyInEffect($spid, $duration, $direction, $paragraph),
+            'zoom' => $this->buildZoomEffect($spid, $duration, $paragraph),
+            'wipe' => $this->buildWipeEffect($spid, $duration, $direction, $paragraph),
+            default => $this->buildFadeEffect($spid, $duration, $paragraph),
+        };
+
+        // `presetClass="entr"` is what tells PowerPoint this is an ENTRANCE —
+        // it pre-hides the target before the first paint, so the shape never
+        // flashes visible at slide load. The visibility `<p:set>` inside the
+        // effect then reveals it when the build fires. (No separate load-time
+        // hide node is emitted — that approach flashed.)
+        $presetId = $this->animationPresetId($effect);
+
+        return '<p:par>'
+            . '<p:cTn id="' . $wrapId . '" presetID="' . $presetId . '" presetClass="entr" presetSubtype="0" fill="hold">'
+            . $stCond
+            . '<p:childTnLst>'
+            . $effectXml
+            . '</p:childTnLst>'
+            . '</p:cTn>'
+            . '</p:par>';
+    }
+
+    /**
+     * Map an entrance effect to its PowerPoint preset id (used alongside
+     * `presetClass="entr"` so PowerPoint recognises the build as an entrance
+     * and pre-hides the target). Appear=1, Fly In=2, Fade=10, Wipe=22, Zoom=23.
+     */
+    private function animationPresetId(string $effect): int
+    {
+        return match ($effect) {
+            'fly-in' => 2,
+            'wipe' => 22,
+            'zoom' => 23,
+            default => 10, // fade
+        };
+    }
+
+    /**
+     * The visibility `<p:set>` that flips `style.visibility` to `visible` at
+     * the start of an entrance. Paired (in the shape's pre-build state) with a
+     * `<p:set>` to `hidden`, this is how PowerPoint keeps a not-yet-built
+     * element invisible until its build fires.
+     */
+    private function buildVisibilitySet(int $spid, ?int $paragraph = null): string
+    {
+        $id = $this->tnId++;
+
+        return '<p:set>'
+            . '<p:cBhvr>'
+            . '<p:cTn id="' . $id . '" dur="1" fill="hold">'
+            . '<p:stCondLst><p:cond delay="0"/></p:stCondLst>'
+            . '</p:cTn>'
+            . $this->buildTargetEl($spid, $paragraph)
+            . '<p:attrNameLst><p:attrName>style.visibility</p:attrName></p:attrNameLst>'
+            . '</p:cBhvr>'
+            . '<p:to><p:strVal val="visible"/></p:to>'
+            . '</p:set>';
+    }
+
+    /**
+     * `fade` entrance — a visibility set plus `<p:animEffect transition="in"
+     * filter="fade">` over the build duration. When `$paragraph` is set the
+     * effect is scoped to that single `<a:p>` rather than the whole shape.
+     */
+    private function buildFadeEffect(int $spid, int $durationMs, ?int $paragraph = null): string
+    {
+        $set = $this->buildVisibilitySet($spid, $paragraph);
+        $id = $this->tnId++;
+
+        $effect = '<p:animEffect transition="in" filter="fade">'
+            . '<p:cBhvr>'
+            . '<p:cTn id="' . $id . '" dur="' . $durationMs . '"/>'
+            . $this->buildTargetEl($spid, $paragraph)
+            . '</p:cBhvr>'
+            . '</p:animEffect>';
+
+        return $set . $effect;
+    }
+
+    /**
+     * `fly-in` entrance — a visibility set plus a `<p:anim>` translating the
+     * shape from off-slide (per `direction`) to its final position. Offsets are
+     * expressed as fractions of the slide (`ppt_x` / `ppt_y` are 0..1), so a
+     * from-value of `-#ppt_w` (i.e. one shape-width left) slides it in from
+     * the left edge. PowerPoint's stock fly-in uses ±0.5 of the slide; we
+     * follow that for a comparable distance. When `$paragraph` is set the
+     * effect is scoped to that single `<a:p>` rather than the whole shape.
+     */
+    private function buildFlyInEffect(int $spid, int $durationMs, string $direction, ?int $paragraph = null): string
+    {
+        $set = $this->buildVisibilitySet($spid, $paragraph);
+
+        // from → to over ppt_x / ppt_y (slide-fraction coordinates of the
+        // shape's centre). The shape's final centre is "#ppt_x"/"#ppt_y"; we
+        // start it a half-slide off in the chosen direction.
+        [$attr, $fromExpr, $toExpr] = match ($direction) {
+            'right' => ['ppt_x', '1+#ppt_w/2', '#ppt_x'],
+            'up' => ['ppt_y', '0-#ppt_h/2', '#ppt_y'],
+            'down' => ['ppt_y', '1+#ppt_h/2', '#ppt_y'],
+            default => ['ppt_x', '0-#ppt_w/2', '#ppt_x'], // left
+        };
+
+        $id = $this->tnId++;
+
+        $anim = '<p:anim calcmode="lin" valueType="num">'
+            . '<p:cBhvr additive="base">'
+            . '<p:cTn id="' . $id . '" dur="' . $durationMs . '" fill="hold"/>'
+            . $this->buildTargetEl($spid, $paragraph)
+            . '<p:attrNameLst><p:attrName>' . $attr . '</p:attrName></p:attrNameLst>'
+            . '</p:cBhvr>'
+            . '<p:tavLst>'
+            . '<p:tav tm="0"><p:val><p:strVal val="' . $fromExpr . '"/></p:val></p:tav>'
+            . '<p:tav tm="100000"><p:val><p:strVal val="' . $toExpr . '"/></p:val></p:tav>'
+            . '</p:tavLst>'
+            . '</p:anim>';
+
+        return $set . $anim;
+    }
+
+    /**
+     * `zoom` entrance — PowerPoint's "Zoom" is a scale-up from a point paired
+     * with a fade. A generic `<p:anim>` on `ppt_w`/`ppt_h` is NOT rendered as a
+     * grow (it pops); the dedicated `<p:animScale>` behavior is. We run a fade
+     * (`<p:animEffect>`) concurrently so it grows AND fades in. When
+     * `$paragraph` is set the effect is scoped to that single `<a:p>` rather
+     * than the whole shape.
+     */
+    private function buildZoomEffect(int $spid, int $durationMs, ?int $paragraph = null): string
+    {
+        $set = $this->buildVisibilitySet($spid, $paragraph);
+        $fadeId = $this->tnId++;
+        $scaleId = $this->tnId++;
+
+        $fade = '<p:animEffect transition="in" filter="fade">'
+            . '<p:cBhvr>'
+            . '<p:cTn id="' . $fadeId . '" dur="' . $durationMs . '"/>'
+            . $this->buildTargetEl($spid, $paragraph)
+            . '</p:cBhvr>'
+            . '</p:animEffect>';
+
+        // Scale from a point (0%) to full size (100%). x/y in thousandths-of-percent.
+        $scale = '<p:animScale>'
+            . '<p:cBhvr>'
+            . '<p:cTn id="' . $scaleId . '" dur="' . $durationMs . '" fill="hold"/>'
+            . $this->buildTargetEl($spid, $paragraph)
+            . '</p:cBhvr>'
+            . '<p:from x="0" y="0"/>'
+            . '<p:to x="100000" y="100000"/>'
+            . '</p:animScale>';
+
+        return $set . $fade . $scale;
+    }
+
+    /**
+     * `wipe` entrance — a visibility set plus `<p:animEffect transition="in"
+     * filter="wipe(...)">` keyed to `direction`. PowerPoint's wipe filter
+     * names the edge the wipe travels FROM: a left-direction wipe reveals from
+     * the right edge inward, so we map the deck direction to the matching
+     * filter subtype. When `$paragraph` is set the effect is scoped to that
+     * single `<a:p>` rather than the whole shape.
+     */
+    private function buildWipeEffect(int $spid, int $durationMs, string $direction, ?int $paragraph = null): string
+    {
+        $set = $this->buildVisibilitySet($spid, $paragraph);
+
+        $filter = match ($direction) {
+            'right' => 'wipe(left)',
+            'up' => 'wipe(down)',
+            'down' => 'wipe(up)',
+            default => 'wipe(right)', // left
+        };
+
+        $id = $this->tnId++;
+
+        $effect = '<p:animEffect transition="in" filter="' . $filter . '">'
+            . '<p:cBhvr>'
+            . '<p:cTn id="' . $id . '" dur="' . $durationMs . '"/>'
+            . $this->buildTargetEl($spid, $paragraph)
+            . '</p:cBhvr>'
+            . '</p:animEffect>';
+
+        return $set . $effect;
+    }
+
+    /** Normalise the animation effect name; unknown effects fall back to fade. */
+    private function animationEffect(mixed $effect): string
+    {
+        $name = is_string($effect) ? strtolower($effect) : '';
+
+        return in_array($name, Schema::ANIMATION_EFFECTS, true) ? $name : 'fade';
+    }
+
+    /** Normalise the animation trigger; defaults to on-click. */
+    private function animationTrigger(mixed $trigger): string
+    {
+        $name = is_string($trigger) ? strtolower($trigger) : '';
+
+        return in_array($name, Schema::ANIMATION_TRIGGERS, true) ? $name : 'on-click';
+    }
+
+    /** Normalise the animation direction; defaults to left. */
+    private function animationDirection(mixed $direction): string
+    {
+        $name = is_string($direction) ? strtolower($direction) : '';
+
+        return in_array($name, Schema::ANIMATION_DIRECTIONS, true) ? $name : 'left';
+    }
+
+    /**
+     * Resolve a build's duration in milliseconds (default 500, clamped >= 1 so
+     * `<p:cTn dur>` is always a positive number PowerPoint accepts).
+     *
+     * @param  array<string, mixed>  $animation
+     */
+    private function animationDuration(array $animation): int
+    {
+        $duration = isset($animation['duration']) && is_numeric($animation['duration'])
+            ? (int) round((float) $animation['duration'])
+            : Schema::ANIMATION_DEFAULT_DURATION_MS;
+
+        return max(1, $duration);
+    }
+
+    /**
+     * Resolve a build's begin delay in milliseconds (default 0, clamped >= 0).
+     *
+     * @param  array<string, mixed>  $animation
+     */
+    private function animationDelay(array $animation): int
+    {
+        $delay = isset($animation['delay']) && is_numeric($animation['delay'])
+            ? (int) round((float) $animation['delay'])
+            : 0;
+
+        return max(0, $delay);
     }
 
     /**

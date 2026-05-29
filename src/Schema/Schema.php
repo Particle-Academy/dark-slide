@@ -54,6 +54,21 @@ final class Schema
     /** Directions accepted by directional transitions (slide/push). */
     public const SLIDE_TRANSITION_DIRECTIONS = ['left', 'right', 'up', 'down'];
 
+    /**
+     * Element entrance-animation effects the writer maps to OOXML `<p:timing>`
+     * entrance behaviors. Mirrors fancy-slides `AnimationEffect`.
+     */
+    public const ANIMATION_EFFECTS = ['fade', 'fly-in', 'zoom', 'wipe'];
+
+    /** Triggers controlling when a build fires relative to its neighbours. */
+    public const ANIMATION_TRIGGERS = ['on-click', 'with-prev', 'after-prev'];
+
+    /** Directions accepted by directional entrance animations (fly-in / wipe). */
+    public const ANIMATION_DIRECTIONS = ['left', 'right', 'up', 'down'];
+
+    /** Default entrance-animation duration in milliseconds. */
+    public const ANIMATION_DEFAULT_DURATION_MS = 500;
+
     /** Default slide width in EMU (English Metric Units) for 16:9 at 10". 914400 EMU = 1 inch. */
     public const DEFAULT_SLIDE_WIDTH_EMU = 9144000;
     public const DEFAULT_SLIDE_HEIGHT_EMU = 5143500;
@@ -213,6 +228,26 @@ final class Schema
                 'rows' => ['type' => 'array'],
                 'option' => ['type' => 'object'],
                 'chartTheme' => ['type' => 'string'],
+                // Optional entrance build animation. When present the element
+                // participates in the slide's build sequence and the writer
+                // emits a matching `<p:timing>` entrance behavior.
+                'animation' => [
+                    'type' => 'object',
+                    'required' => ['effect'],
+                    'properties' => [
+                        'effect' => ['type' => 'string', 'enum' => self::ANIMATION_EFFECTS],
+                        'trigger' => ['type' => 'string', 'enum' => self::ANIMATION_TRIGGERS],
+                        'direction' => ['type' => 'string', 'enum' => self::ANIMATION_DIRECTIONS],
+                        'duration' => ['type' => 'number'],
+                        'delay' => ['type' => 'number'],
+                        'order' => ['type' => 'number'],
+                        // Text elements only: animate each paragraph (line) of
+                        // the content separately (PowerPoint "By paragraph").
+                        // The first paragraph uses `trigger`; every later
+                        // paragraph becomes its own on-click step.
+                        'byParagraph' => ['type' => 'boolean'],
+                    ],
+                ],
             ],
         ];
     }

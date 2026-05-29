@@ -1,5 +1,54 @@
 # Changelog
 
+## v0.5.0 — 2026-05-29
+
+### Element entrance animations → OOXML `<p:timing>`
+
+- New optional `element.animation` — `{ effect: fade|fly-in|zoom|wipe,
+  trigger?: on-click|with-prev|after-prev, direction?: left|right|up|down,
+  duration?: ms, delay?: ms, order?: number }`. Mirrors the shape
+  `@particle-academy/fancy-slides` emits, so build steps authored in the
+  editor now export to PowerPoint.
+- Slides with any animated element emit a real `<p:timing>` tree (last child
+  of `<p:sld>`, after any `<p:transition>`, per CT_Slide's element order). The
+  tree is a `tmRoot` `<p:par>` → `mainSeq` `<p:seq>` with one click-step
+  `<p:par>` per build step. Builds are stable-sorted by `(order ?? 0)` then
+  array index, then grouped exactly like fancy-slides' `buildSteps()`: the
+  first build and every `on-click` build open a new step (gated by
+  `<p:cond delay="indefinite"/>`); `with-prev` attaches with begin 0;
+  `after-prev` begins after the lead build's duration.
+- Each build targets its shape via `<p:spTgt spid="N">`, where `N` is the exact
+  `<p:cNvPr id>` assigned when the shape was emitted (captured during body
+  emission, never recomputed — so the target always matches even when the
+  shape-id counter skips elements that render to nothing).
+- Effect mapping: `fade` → `<p:animEffect transition="in" filter="fade">`;
+  `fly-in` → `<p:anim>` translating `ppt_x`/`ppt_y` from off-slide to final;
+  `zoom` → a `<p:animScale>` growing from a point (`<p:from x="0" y="0"/>` →
+  `<p:to x="100000" y="100000"/>`) run concurrently with a fade `<p:animEffect>`
+  — a generic `<p:anim>` on `ppt_w`/`ppt_h` pops rather than grows, so the
+  dedicated scale behavior is required for PowerPoint to render the grow;
+  `wipe` → `<p:animEffect filter="wipe(dir)">` keyed to direction. Each
+  entrance pairs with a `style.visibility` `<p:set>`.
+- **By-paragraph builds.** A text element's `animation` may set
+  `byParagraph: true` (PowerPoint "By paragraph"): the writer splits its
+  `content` into paragraphs the SAME way the text body does (`explode("\n")`,
+  so paragraph index *i* lines up with `<a:p>` index *i* in `<p:txBody>`) and
+  emits ONE build node per paragraph, each scoped to that single line via
+  `<p:spTgt spid="N"><p:txEl><p:pRg st="i" end="i"/></p:txEl></p:spTgt>`. The
+  hide-until-built `<p:set>` is paragraph-scoped too, so each line stays hidden
+  until its own build fires. The element's first paragraph keeps the element's
+  `trigger` (and its place from `order`); every later paragraph is its own
+  `on-click` step (one line per click). Non-text elements and text without
+  `byParagraph` are unchanged (whole-shape `<p:spTgt spid="N"/>`).
+- Schema: `animation` gains an optional `byParagraph: boolean`.
+- Animated shapes are hidden at slide load (an instantaneous visibility→hidden
+  `<p:set>` group that fires before the first click) and re-shown when their
+  build fires, so a not-yet-built element never pre-shows. Elements with no
+  `animation` are untouched — always visible, no timing node.
+- Schema: added `ANIMATION_EFFECTS` / `ANIMATION_TRIGGERS` /
+  `ANIMATION_DIRECTIONS` constants and an `animation` object in
+  `jsonSchema()`'s element properties. Validation stays liberal.
+
 ## v0.4.2 — 2026-05-29
 
 ### Fixed

@@ -84,7 +84,7 @@ write.
 
 See [`docs/schema.md`](./docs/schema.md) for the full reference.
 
-## Element coverage (v0.4)
+## Element coverage (v0.5)
 
 | Element | Writer | Reader |
 |---|:-:|:-:|
@@ -97,6 +97,11 @@ See [`docs/schema.md`](./docs/schema.md) for the full reference.
 | chart  | ✅ native OOXML chart parts (bar / line / area / pie / scatter) from an ECharts-style `option`; graceful image / placeholder fallback | ⚠ skipped |
 | embed  | not representable in pptx | n/a |
 | transitions | ✅ per-slide `transition` (fade / slide / zoom) + deck `defaultTransition` | ⚠ skipped |
+| animations | ✅ per-element `animation` (fade / fly-in / zoom / wipe) → `<p:timing>` build steps | ⚠ skipped |
+
+### What's new in v0.5
+
+- **Element entrance animations**. Add `animation: { effect, trigger?, direction?, duration?, delay?, order? }` to any element (`effect`: `fade` / `fly-in` / `zoom` / `wipe`). Slides with animations emit a real `<p:timing>` tree: builds are sorted by `(order, index)` and grouped into click steps (`on-click` opens a step; `with-prev` / `after-prev` attach to it), mirroring fancy-slides' build sequencer. Each build targets its shape by the exact `<p:cNvPr id>` it was emitted with; animated shapes start hidden and reveal when their build fires. Elements without `animation` are unaffected.
 
 ### What's new in v0.4
 
