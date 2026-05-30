@@ -1413,7 +1413,50 @@ final class PptxWriter
             default => '',
         };
 
+        // Whole-element hyperlink — inject an <a:hlinkClick> into the shape's
+        // <p:cNvPr> and register an external relationship. Mirrors the
+        // fancy-slides ElementBase.href click target.
+        $xml = $this->applyHyperlink($xml, $element, $shapeId, $rels);
+
         return [$xml, $rels];
+    }
+
+    /**
+     * If the element carries an `href`, register an external hyperlink
+     * relationship and inject `<a:hlinkClick r:id="…">` into the shape's first
+     * `<p:cNvPr>` (the relationships + drawingml namespaces are already declared
+     * on the slide root, so the element needs no extra xmlns). No-op when there
+     * is no href or no shape XML.
+     *
+     * @param  array<string, mixed>  $element
+     * @param  list<array{id: string, type: string, target: string, mode?: string}>  $rels
+     */
+    private function applyHyperlink(string $xml, array $element, int $shapeId, array &$rels): string
+    {
+        $href = $element['href'] ?? null;
+        if (!is_string($href) || $href === '' || $xml === '') {
+            return $xml;
+        }
+
+        $relId = 'rIdLink' . $shapeId;
+        $rels[] = [
+            'id' => $relId,
+            'type' => 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink',
+            'target' => $href,
+            'mode' => 'External',
+        ];
+
+        $hlink = '<a:hlinkClick r:id="' . $relId . '"/>';
+        $count = 0;
+        $injected = preg_replace(
+            '/<p:cNvPr\b([^>]*)\/>/',
+            '<p:cNvPr$1>' . $hlink . '</p:cNvPr>',
+            $xml,
+            1,
+            $count
+        );
+
+        return ($injected !== null && $count > 0) ? $injected : $xml;
     }
 
     // ─── Element renderers ────────────────────────────────────────────────
@@ -2563,9 +2606,11 @@ final class PptxWriter
             $nextRelNum++;
         }
 
-        // Media rels (set during slide build via $pendingSlideRels).
+        // Media + hyperlink rels (set during slide build via $pendingSlideRels).
+        // External targets (hyperlinks) carry TargetMode="External".
         foreach ($this->pendingSlideRels[$slideNumber] ?? [] as $rel) {
-            $rels .= '<Relationship Id="' . Xml::attr($rel['id']) . '" Type="' . Xml::attr($rel['type']) . '" Target="' . Xml::attr($rel['target']) . '"/>';
+            $mode = (($rel['mode'] ?? null) === 'External') ? ' TargetMode="External"' : '';
+            $rels .= '<Relationship Id="' . Xml::attr($rel['id']) . '" Type="' . Xml::attr($rel['type']) . '" Target="' . Xml::attr($rel['target']) . '"' . $mode . '/>';
         }
 
         return Xml::declaration()

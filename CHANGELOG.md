@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.5.2 — 2026-05-29
+
+### Writer — emit whole-element hyperlinks
+
+- An element's `href` now exports as a real pptx hyperlink: the writer injects
+  `<a:hlinkClick r:id="…">` into the shape's `<p:cNvPr>` and registers an
+  external slide relationship (`TargetMode="External"`) pointing at the URL.
+  Completes the `href` support added to the schema in 0.5.1 (no longer carried
+  only in the deck JSON). Works for every element type (text / image / shape /
+  code / table / chart). Inline links inside text via markdown `[label](url)`
+  continue to export as before.
+
 ## v0.5.1 — 2026-05-29
 
 ### Schema — keep lockstep with fancy-slides
