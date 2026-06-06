@@ -1,5 +1,7 @@
 # DarkSlide
 
+[![Fancy UI suite](art/fancy-ui.svg)](https://particle.academy)
+
 PHP package for reading and writing presentation files (`.pptx`) from a
 JSON-friendly schema. Framework-agnostic core with an optional Laravel
 adapter. Designed to round-trip with the
