@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.6.0 — 2026-06-08
+
+The "agent kit, not just a writer" release — resolving the whole open issue set
+(filed from Decksmith) and the shared op contract with `@particle-academy/fancy-slides`.
+
+### Added — the shared op spine
+- **`DarkSlide\Reducer::apply($deck, $op)`** — the server-authoritative twin of
+  fancy-slides' `reduceDeck`; applies a canonical `DeckOp` and returns a new
+  deck. Route `<DeckEditor>`'s `onOp` straight through it — one reducer in
+  whichever language hosts the deck. (#1)
+- **`Agent::diff($a, $b): DeckOp[]`** — the op list that turns `$a` into `$b`, in
+  the shared vocabulary. Verify-and-fallback guarantees the round-trip property
+  `reduce($a, diff($a, $b)) == $b`. Plus `Agent::reduce()`. (#5)
+- **`DeckOpSchema` / `Agent::opSchema()`** — the DeckOp JSON Schema of record,
+  byte-aligned with fancy-slides' `deckOpSchema()`. (#1)
+
+### Added — export DX
+- **`ImageResolver`** (+ `Images\LocalFileImageResolver`, `Images\CallbackImageResolver`)
+  — defer image-byte resolution to the host; pass via the `images` write option.
+  No more walking the deck to inline data URIs before export. (#2)
+- **`DarkSlide\Layout::fit($slide, $opts)`** — opt-in snap-to-grid, overlap
+  reflow, and fit-text for machine-authored slides. Pure; never automatic. (#3)
+- **`Agent::toStream($deck): resource`** — streamed-export counterpart to
+  `toBytes()` for `response()->stream(...)` (returns a PHP stream resource to
+  stay dependency-free). (#6)
+- **Chart export strategy** — `chart.mode = 'png' | 'native'` (default `'png'`):
+  PNG renders via a consumer `ChartRenderer` (or a pre-rendered `chart.image`) so
+  the .pptx matches the editor; degrades to the native OOXML chart when no PNG
+  source is available, so existing decks are unaffected. Pass a renderer via the
+  `charts` write option. (#4)
+- **`slide.narration`** schema field — plain-text narration for AI-narrated decks
+  (opaque to the writer); `notes` documented as Markdown. (#7, partial — reading
+  arbitrary non-fancy-slides `.pptx` remains future/experimental.)
+
+### Compatibility
+- Additive. No breaking changes; existing schemas + exports behave identically.
+- Still zero third-party runtime deps.
+
 ## v0.5.2 — 2026-05-29
 
 ### Writer — emit whole-element hyperlinks

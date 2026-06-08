@@ -120,15 +120,55 @@ final class Agent
     }
 
     /**
+     * Stream the PPTX bytes as a readable PHP stream resource — the streaming
+     * counterpart to {@see toBytes()}, so a controller can return a streamed
+     * response instead of buffering the whole body:
+     *
+     *   $stream = Agent::toStream($deck);
+     *   return response()->stream(
+     *       fn () => fpassthru($stream),
+     *       200,
+     *       ['Content-Type' => 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+     *        'Content-Disposition' => 'attachment; filename="deck.pptx"'],
+     *   );
+     *
+     * Returns a PHP `resource` (not a PSR `StreamInterface`) to keep dark-slide
+     * dependency-free; wrap it in your framework's stream type if you need one.
+     *
+     * @param  array<string, mixed>  $deck
+     * @param  array{tempDir?: ?string, allowHttpImages?: bool, images?: ImageResolver}  $options
+     * @return resource
+     *
+     * @throws SchemaException
+     */
+    public static function toStream(array $deck, array $options = [])
+    {
+        $bytes = self::toBytes($deck, $options);
+        $stream = fopen('php://temp', 'r+b');
+        if ($stream === false) {
+            throw new \RuntimeException('Agent::toStream: could not open a temp stream.');
+        }
+        fwrite($stream, $bytes);
+        rewind($stream);
+
+        return $stream;
+    }
+
+    /**
      * Construct a writer from the shared options array.
      *
-     * @param  array{tempDir?: ?string, allowHttpImages?: bool}  $options
+     * @param  array{tempDir?: ?string, allowHttpImages?: bool, images?: ImageResolver}  $options
      */
     private static function makeWriter(array $options): PptxWriter
     {
+        $images = $options['images'] ?? null;
+        $charts = $options['charts'] ?? null;
+
         return new PptxWriter(
             $options['tempDir'] ?? null,
             (bool) ($options['allowHttpImages'] ?? false),
+            $images instanceof ImageResolver ? $images : null,
+            $charts instanceof ChartRenderer ? $charts : null,
         );
     }
 
@@ -191,5 +231,48 @@ final class Agent
     public static function jsonSchema(): array
     {
         return Schema::jsonSchema();
+    }
+
+    /**
+     * Apply one or more canonical DeckOps to a deck, returning a new deck. The
+     * server-authoritative twin of fancy-slides' `reduceDeck` — route
+     * `<DeckEditor>`'s `onOp` through this to keep a single reducer.
+     *
+     * @param  array<string,mixed>  $deck
+     * @param  array<string,mixed>|list<array<string,mixed>>  $opOrOps  one DeckOp or a list of them
+     * @return array<string,mixed>
+     */
+    public static function reduce(array $deck, array $opOrOps): array
+    {
+        $isList = $opOrOps === [] || array_is_list($opOrOps);
+        $ops = $isList && (isset($opOrOps[0]) ? is_array($opOrOps[0]) : true) ? $opOrOps : [$opOrOps];
+
+        return Reducer::applyAll($deck, $ops);
+    }
+
+    /**
+     * Produce the op list that transforms `$a` into `$b`, in the canonical
+     * DeckOp vocabulary — broadcastable, replayable, auditable. Guarantees the
+     * round-trip property `reduce($a, diff($a, $b)) == $b`.
+     *
+     * @param  array<string,mixed>  $a
+     * @param  array<string,mixed>  $b
+     * @return list<array<string,mixed>>
+     */
+    public static function diff(array $a, array $b): array
+    {
+        return Differ::diff($a, $b);
+    }
+
+    /**
+     * JSON Schema for a single canonical DeckOp — ship aligned with
+     * fancy-slides' `deckOpSchema()`. Use to validate ops on the wire or to
+     * register the op vocabulary as an LLM tool definition.
+     *
+     * @return array<string,mixed>
+     */
+    public static function opSchema(): array
+    {
+        return DeckOpSchema::jsonSchema();
     }
 }

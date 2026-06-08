@@ -108,8 +108,12 @@ final class PptxWriter
      *                                 remote URLs is a security boundary the
      *                                 caller must opt into.
      */
-    public function __construct(private ?string $tempDir = null, private bool $allowHttpImages = false)
-    {
+    public function __construct(
+        private ?string $tempDir = null,
+        private bool $allowHttpImages = false,
+        private ?\DarkSlide\ImageResolver $images = null,
+        private ?\DarkSlide\ChartRenderer $charts = null,
+    ) {
     }
 
     private function resolveTempDir(): string
@@ -1869,6 +1873,34 @@ final class PptxWriter
     private function buildChart(array $element, int $shapeId, int $slideNumber, array &$rels): string
     {
         $option = is_array($element['option'] ?? null) ? $element['option'] : null;
+
+        // Chart export strategy (DS #4): default to PNG so the .pptx matches the
+        // browser editor pixel-for-pixel, falling back to a native OOXML chart
+        // when no PNG source is available. `chart.mode = 'native'` forces native.
+        $mode = is_string($element['mode'] ?? null) ? $element['mode'] : 'png';
+
+        if ($mode !== 'native') {
+            // (a) a pre-rendered data: URI on the element, or (b) a consumer
+            // ChartRenderer rendering the option to PNG bytes on demand.
+            $png = $this->chartPreRenderSrc($element);
+            if ($png === null && $this->charts !== null && $option !== null) {
+                $w = max(1, (int) round((float) ($element['w'] ?? 0.5) * 1280));
+                $h = max(1, (int) round((float) ($element['h'] ?? 0.4) * 720));
+                $bytes = $this->charts->render($option, $w, $h);
+                if (is_string($bytes) && $bytes !== '') {
+                    $png = 'data:image/png;base64,'.base64_encode($bytes);
+                }
+            }
+            if ($png !== null) {
+                $imageElement = $element;
+                $imageElement['src'] = $png;
+                $imageElement['fit'] = $element['fit'] ?? 'contain';
+
+                return $this->buildImageShape($imageElement, $shapeId, $slideNumber, $rels);
+            }
+            // No PNG available — degrade to native below.
+        }
+
         $spec = $option !== null ? ChartTranslator::translate($option) : null;
 
         if ($spec !== null) {
@@ -1887,7 +1919,7 @@ final class PptxWriter
             return $this->buildChartFrame($element, $shapeId, $relId);
         }
 
-        // Fallback 1: a pre-rendered chart image on the element.
+        // Fallback: a pre-rendered chart image on the element (native mode path).
         $preRender = $this->chartPreRenderSrc($element);
         if ($preRender !== null) {
             $imageElement = $element;
@@ -2499,6 +2531,16 @@ final class PptxWriter
      */
     private function loadImageBytes(string $src): ?array
     {
+        // Consumer-supplied resolver gets first crack at any src (asset:N,
+        // s3://, http without the allowHttpImages flag, …). Returning bytes
+        // short-circuits; returning null falls through to the built-in handling.
+        if ($this->images !== null) {
+            $resolved = $this->images->resolve($src);
+            if (is_string($resolved) && $resolved !== '') {
+                return ['bytes' => $resolved, 'mime' => $this->guessMimeFromBytes($resolved, $src)];
+            }
+        }
+
         // data: URI — decode inline.
         if (preg_match('/^data:([^;,]+)(?:;base64)?,(.*)$/s', $src, $m) === 1) {
             $mime = $m[1];
