@@ -24,10 +24,19 @@ final class Reducer
     /**
      * @param  array<string,mixed>  $deck
      * @param  array<string,mixed>  $op    A DeckOp keyed by an `op` discriminator.
+     * @param  array{onMissing?: 'skip'|'throw'}  $opts  `onMissing` (default `'skip'`):
+     *   `'skip'` returns the deck unchanged when the op targets a missing
+     *   slide/element (resilient broadcast replay); `'throw'` raises an
+     *   {@see \InvalidArgumentException} naming the missing id (agent-facing
+     *   paths, where a silent no-op masks a typo). See {@see strictApply()}.
      * @return array<string,mixed>
      */
-    public static function apply(array $deck, array $op): array
+    public static function apply(array $deck, array $op, array $opts = []): array
     {
+        if (($opts['onMissing'] ?? 'skip') === 'throw') {
+            self::assertTargetsExist($deck, $op);
+        }
+
         $type = $op['op'] ?? null;
 
         switch ($type) {
@@ -140,19 +149,75 @@ final class Reducer
     }
 
     /**
+     * Strict apply — throws {@see \InvalidArgumentException} naming the missing
+     * slide/element when an op targets one that isn't on the deck, instead of
+     * silently returning the deck unchanged. The signal an agent acts on.
+     *
+     * Sugar for `apply($deck, $op, ['onMissing' => 'throw'])`. The JS twin is
+     * `reduce(deck, op, { onMissing: 'throw' })` in `@particle-academy/fancy-slides`.
+     *
+     * @param  array<string,mixed>  $deck
+     * @param  array<string,mixed>  $op
+     * @return array<string,mixed>
+     */
+    public static function strictApply(array $deck, array $op): array
+    {
+        return self::apply($deck, $op, ['onMissing' => 'throw']);
+    }
+
+    /**
      * Apply a list of ops in order.
      *
      * @param  array<string,mixed>  $deck
      * @param  list<array<string,mixed>>  $ops
+     * @param  array{onMissing?: 'skip'|'throw'}  $opts  Forwarded to {@see apply()}.
      * @return array<string,mixed>
      */
-    public static function applyAll(array $deck, array $ops): array
+    public static function applyAll(array $deck, array $ops, array $opts = []): array
     {
         foreach ($ops as $op) {
-            $deck = self::apply($deck, $op);
+            $deck = self::apply($deck, $op, $opts);
         }
 
         return $deck;
+    }
+
+    /**
+     * Assert the op's target slide (and element, when addressed) exist on the
+     * deck. Deck-level ops and `slide.add` address no existing target, so they
+     * always pass. Used by the strict path; ids are stringified for the message.
+     *
+     * @param  array<string,mixed>  $deck
+     * @param  array<string,mixed>  $op
+     */
+    private static function assertTargetsExist(array $deck, array $op): void
+    {
+        if (! isset($op['slideId'])) {
+            return;
+        }
+        $slideId = (string) $op['slideId'];
+
+        $slide = null;
+        foreach ($deck['slides'] ?? [] as $s) {
+            if ((string) ($s['id'] ?? '') === $slideId) {
+                $slide = $s;
+                break;
+            }
+        }
+        if ($slide === null) {
+            throw new \InvalidArgumentException("No slide '{$slideId}' in the deck.");
+        }
+
+        if (! isset($op['elementId'])) {
+            return;
+        }
+        $elementId = (string) $op['elementId'];
+        foreach ($slide['elements'] ?? [] as $e) {
+            if ((string) ($e['id'] ?? '') === $elementId) {
+                return;
+            }
+        }
+        throw new \InvalidArgumentException("No element '{$elementId}' on slide '{$slideId}'.");
     }
 
     /**

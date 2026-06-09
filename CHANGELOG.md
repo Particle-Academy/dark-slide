@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.7.0 — 2026-06-09
+
+A "felt-while-using" follow-up surfaced by Decksmith's adoption of the 0.6 API.
+
+### Added
+- **Strict-mode `Reducer`** (#8) — `Reducer::strictApply($deck, $op)` (and an
+  `apply($deck, $op, ['onMissing' => 'throw'])` opts arg) throws
+  `InvalidArgumentException` naming the missing slide/element when an op targets
+  one that isn't on the deck, instead of silently returning the deck unchanged.
+  The default stays silent-skip (resilient broadcast replay); strict mode is the
+  signal agent/MCP tool paths need so a typo'd `slideId` doesn't report success.
+  `applyAll` forwards the opts. Twin of `@particle-academy/fancy-slides`'
+  `reduce(deck, op, { onMissing: 'throw' })`. Fully backward-compatible.
+
 ## v0.6.0 — 2026-06-08
 
 The "agent kit, not just a writer" release — resolving the whole open issue set

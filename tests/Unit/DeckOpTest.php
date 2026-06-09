@@ -128,6 +128,38 @@ it('Agent::reduce + Agent::diff delegate correctly', function () {
     expect($one['title'])->toBe('Solo');
 });
 
+it('strictApply throws naming a missing slide target', function () {
+    $deck = deckFixture();
+    expect(fn () => Reducer::strictApply($deck, ['op' => 'element.update', 'slideId' => 'oops', 'elementId' => 'e1', 'patch' => ['content' => 'x']]))
+        ->toThrow(InvalidArgumentException::class, "No slide 'oops' in the deck.");
+});
+
+it('strictApply throws naming a missing element target', function () {
+    $deck = deckFixture();
+    expect(fn () => Reducer::strictApply($deck, ['op' => 'element.move', 'slideId' => 's1', 'elementId' => 'ghost', 'x' => 0.1, 'y' => 0.1]))
+        ->toThrow(InvalidArgumentException::class, "No element 'ghost' on slide 's1'.");
+});
+
+it('strictApply mutates normally when targets exist', function () {
+    $out = Reducer::strictApply(deckFixture(), ['op' => 'element.update', 'slideId' => 's1', 'elementId' => 'e1', 'patch' => ['content' => 'Hi']]);
+    expect($out['slides'][0]['elements'][0]['content'])->toBe('Hi');
+});
+
+it('default apply silently skips a missing target (backward compatible)', function () {
+    $deck = deckFixture();
+    expect(normalizeDeck(Reducer::apply($deck, ['op' => 'slide.remove', 'slideId' => 'nope'])))
+        ->toEqual(normalizeDeck($deck));
+    expect(normalizeDeck(Reducer::apply($deck, ['op' => 'element.move', 'slideId' => 'nope', 'elementId' => 'x', 'x' => 1, 'y' => 1], ['onMissing' => 'skip'])))
+        ->toEqual(normalizeDeck($deck));
+});
+
+it('strict mode never throws for deck-level ops or slide.add', function () {
+    $deck = deckFixture();
+    expect(Reducer::strictApply($deck, ['op' => 'deck.setTitle', 'title' => 'T'])['title'])->toBe('T');
+    $added = Reducer::strictApply($deck, ['op' => 'slide.add', 'index' => 0, 'slide' => ['id' => 's9', 'elements' => []]]);
+    expect(array_column($added['slides'], 'id'))->toBe(['s9', 's1', 's2']);
+});
+
 /** Recursively ksort assoc arrays so equality ignores key order. */
 function normalizeDeck(mixed $v): mixed
 {
