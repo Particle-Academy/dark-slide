@@ -125,3 +125,9 @@ See [`docs/schema.md`](./docs/schema.md) for the full reference.
 ## License
 
 MIT
+
+---
+
+## ⭐ Star Fancy UI
+
+If this package is useful to you, a quick ⭐ on the repo really helps us build a better kit. Thank you!
