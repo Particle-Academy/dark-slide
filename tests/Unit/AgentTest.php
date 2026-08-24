@@ -375,7 +375,10 @@ it('highlights code blocks with colored token runs', function () {
         'id' => 'snippet',
         'type' => 'code',
         'x' => 0.05, 'y' => 0.05, 'w' => 0.9, 'h' => 0.4,
-        'code' => "const greet = (name) => `Hello, ${name}`;\n// comment",
+        // Single-quoted: PHP 8.4 deprecates `${...}` inside a double-quoted
+        // string, and this fixture must keep the JS template literal verbatim.
+        'code' => 'const greet = (name) => `Hello, ${name}`;' . "
+" . '// comment',
         'language' => 'typescript',
     ];
 

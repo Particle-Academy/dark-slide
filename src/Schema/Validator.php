@@ -160,6 +160,15 @@ final class Validator
                         $errors[] = $this->err("{$path}/code", 'string', $this->typeOf($element['code'] ?? null), $element['code'] ?? null, 'Code element must have a `code` string.');
                     }
                     break;
+                case 'kpiBand':
+                case 'metadataGrid':
+                    // An items-less composite is not an error the writer can
+                    // see: it expands to a table with no rows and renders as a
+                    // blank rectangle, which is the worst kind of wrong.
+                    if (!isset($element['items']) || !is_array($element['items']) || $element['items'] === []) {
+                        $errors[] = $this->err("{$path}/items", 'non-empty array', $this->typeOf($element['items'] ?? null), $element['items'] ?? null, "A `{$element['type']}` must have a non-empty `items` array.");
+                    }
+                    break;
             }
         }
 

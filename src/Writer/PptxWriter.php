@@ -11,6 +11,9 @@ use DarkSlide\Helpers\MarkdownInline;
 use DarkSlide\Helpers\SyntaxHighlighter;
 use DarkSlide\Helpers\Xml;
 use DarkSlide\Schema\Schema;
+use DarkSlide\Table\Composites;
+use DarkSlide\Table\TableResolver;
+use DarkSlide\Text\BoxDecoration;
 use RuntimeException;
 use ZipArchive;
 
@@ -96,6 +99,15 @@ final class PptxWriter
     /** Accent hex (no #) pulled from the deck theme; drives chart series colors. */
     private string $themeAccent = '8B5CF6';
 
+    /** The deck's theme, kept whole so the table resolver can read its colours. */
+    private array $deckTheme = [];
+
+    /** `anchor` on `<a:tcPr>` — the vertical anchor of a table cell. */
+    private const ANCHOR_ATTR = ['top' => 't', 'middle' => 'ctr', 'bottom' => 'b'];
+
+    /** `algn` on `<a:pPr>`. */
+    private const ALIGN_ATTR = ['left' => 'l', 'center' => 'ctr', 'right' => 'r', 'justify' => 'just'];
+
     /**
      * Override the temp directory used while assembling the archive.
      * Defaults to {@see sys_get_temp_dir()}; callers running in
@@ -161,6 +173,7 @@ final class PptxWriter
         $this->chartFiles = [];
         $this->pendingSlideRels = [];
         [$this->themeAccent] = Color::parse($deck['theme']['colors']['accent'] ?? '#8B5CF6', '8B5CF6');
+        $this->deckTheme = is_array($deck['theme'] ?? null) ? $deck['theme'] : [];
 
         $slides = $deck['slides'] ?? [];
         $slideCount = count($slides);
@@ -1406,6 +1419,13 @@ final class PptxWriter
     private function buildElementXml(array $element, int $shapeId, int $slideNumber): array
     {
         $rels = [];
+
+        // Composites are authoring sugar: they become an ordinary `table`
+        // element here, before anything is serialised. See Table\Composites.
+        if (Composites::isComposite($element['type'] ?? null)) {
+            $element = Composites::expand($element, $this->deckTheme);
+        }
+
         $xml = match ($element['type']) {
             'text' => $this->buildTextShape($element, $shapeId),
             'image' => $this->buildImageShape($element, $shapeId, $slideNumber, $rels),
@@ -1469,8 +1489,12 @@ final class PptxWriter
     private function buildTextShape(array $element, int $shapeId): string
     {
         $xfrm = $this->xfrmFromFractions($element);
-        $body = $this->buildTextBody((string) ($element['content'] ?? ''), $element['style'] ?? [], $element['format'] ?? 'plain');
+        $style = is_array($element['style'] ?? null) ? $element['style'] : [];
+        $body = $this->buildTextBody((string) ($element['content'] ?? ''), $style, $element['format'] ?? 'plain');
         $id = $element['id'] ?? "text-{$shapeId}";
+
+        $widthEmu = Emu::fromFracX((float) ($element['w'] ?? 0.8));
+        $heightEmu = Emu::fromFracY((float) ($element['h'] ?? 0.2));
 
         return '<p:sp>'
             . '<p:nvSpPr>'
@@ -1480,8 +1504,7 @@ final class PptxWriter
             . '</p:nvSpPr>'
             . '<p:spPr>'
             . $xfrm
-            . '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>'
-            . '<a:noFill/>'
+            . BoxDecoration::spPr($style, $widthEmu, $heightEmu)
             . '</p:spPr>'
             . $body
             . '</p:sp>';
@@ -1658,13 +1681,34 @@ final class PptxWriter
         };
 
         [$fillHex, $fillAlpha] = Color::parse($element['fill'] ?? 'rgba(139,92,246,0.15)', '8B5CF6');
-        [$strokeHex, ] = Color::parse($element['stroke'] ?? '#8B5CF6', '8B5CF6');
-        $strokeWidthEmu = Emu::fromPt((float) ($element['strokeWidth'] ?? 2));
+        [$strokeHex, $strokeAlpha] = Color::parse($element['stroke'] ?? '#8B5CF6', '8B5CF6');
+        $strokeWidth = (float) ($element['strokeWidth'] ?? 2);
+        $strokeWidthEmu = Emu::fromPt($strokeWidth);
         $dashStr = !empty($element['dashed']) ? '<a:prstDash val="dash"/>' : '';
 
         $fillXml = $fillAlpha === 0
             ? '<a:noFill/>'
             : '<a:solidFill><a:srgbClr val="' . $fillHex . '"><a:alpha val="' . $fillAlpha . '"/></a:srgbClr></a:solidFill>';
+
+        // "No outline" has to be sayable. `<a:ln w="0">` is a HAIRLINE in every
+        // renderer tested, not an absence, so a zero width or a transparent
+        // stroke has to become an explicit `<a:noFill/>` — otherwise every
+        // composed callout carries a thin border nobody asked for.
+        $lnXml = ($strokeWidth <= 0 || $strokeAlpha === 0)
+            ? '<a:ln><a:noFill/></a:ln>'
+            : '<a:ln w="' . $strokeWidthEmu . '"><a:solidFill><a:srgbClr val="' . $strokeHex . '"/></a:solidFill>' . $dashStr . '</a:ln>';
+
+        // A shape carrying `content` gets a real text body. Before this it was
+        // always an empty `<a:endParaRPr/>`, so a labelled shape was two
+        // elements the author had to keep aligned by hand.
+        $content = (string) ($element['content'] ?? '');
+        $txBody = $content === ''
+            ? '<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang="en-US"/></a:p></p:txBody>'
+            : $this->buildTextBody(
+                $content,
+                array_merge(['align' => 'center', 'verticalAlign' => 'middle'], is_array($element['style'] ?? null) ? $element['style'] : []),
+                (string) ($element['format'] ?? 'plain'),
+            );
 
         return '<p:sp>'
             . '<p:nvSpPr>'
@@ -1676,9 +1720,9 @@ final class PptxWriter
             . $xfrm
             . '<a:prstGeom prst="' . $prst . '"><a:avLst/></a:prstGeom>'
             . $fillXml
-            . '<a:ln w="' . $strokeWidthEmu . '"><a:solidFill><a:srgbClr val="' . $strokeHex . '"/></a:solidFill>' . $dashStr . '</a:ln>'
+            . $lnXml
             . '</p:spPr>'
-            . '<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang="en-US"/></a:p></p:txBody>'
+            . $txBody
             . '</p:sp>';
     }
 
@@ -1756,53 +1800,39 @@ final class PptxWriter
      */
     private function buildTable(array $element, int $shapeId): string
     {
-        $columns = is_array($element['columns'] ?? null) ? $element['columns'] : [];
-        $rows = is_array($element['rows'] ?? null) ? $element['rows'] : [];
-        if (empty($columns)) {
+        $columnsRaw = is_array($element['columns'] ?? null) ? $element['columns'] : [];
+        if (empty($columnsRaw)) {
             return $this->buildPlaceholder('[table: no columns]', $element, $shapeId);
         }
 
-        $totalWidthEmu = Emu::fromFracX((float) ($element['w'] ?? 0.5));
-        $colCount = count($columns);
-        $colWidthEmu = (int) round($totalWidthEmu / max(1, $colCount));
+        $table = TableResolver::resolve($element, $this->deckTheme);
 
-        // Approximate row height — 40pt header, 30pt body. Could be tighter.
-        $headerRowH = Emu::fromPt(40);
-        $bodyRowH = Emu::fromPt(30);
+        $totalWidthEmu = Emu::fromFracX((float) ($element['w'] ?? 0.5));
+        $widths = TableResolver::columnWidthsEmu($table['columns'], $totalWidthEmu);
 
         $gridCols = '';
-        foreach ($columns as $i => $_) {
-            $gridCols .= '<a:gridCol w="' . $colWidthEmu . '"/>';
+        foreach ($widths as $w) {
+            $gridCols .= '<a:gridCol w="' . $w . '"/>';
         }
 
-        // Header row
-        $headerCells = '';
-        foreach ($columns as $col) {
-            $label = (string) ($col['label'] ?? $col['key'] ?? '');
-            $headerCells .= $this->buildTableCell($label, true);
-        }
-        $headerRow = '<a:tr h="' . $headerRowH . '">' . $headerCells . '</a:tr>';
-
-        // Body rows
-        $bodyRows = '';
-        $rowIndex = 0;
-        foreach ($rows as $row) {
-            if (!is_array($row)) {
-                continue;
-            }
+        $rowsXml = '';
+        foreach ($table['rows'] as $row) {
             $cells = '';
-            foreach ($columns as $col) {
-                $key = (string) ($col['key'] ?? '');
-                $value = $row[$key] ?? '';
-                $text = is_scalar($value) ? (string) $value : json_encode($value);
-                $cells .= $this->buildTableCell((string) $text, false, $rowIndex % 2 === 1);
+            foreach ($row['cells'] as $cell) {
+                $cells .= $this->buildTableCell($cell);
             }
-            $bodyRows .= '<a:tr h="' . $bodyRowH . '">' . $cells . '</a:tr>';
-            $rowIndex++;
+            $rowsXml .= '<a:tr h="' . Emu::fromPt((float) $row['height']) . '">' . $cells . '</a:tr>';
         }
 
         $xfrm = $this->xfrmFromFractions($element);
         $id = $element['id'] ?? "table-{$shapeId}";
+
+        // "No Style, No Grid". Every fill and every rule is now stated per
+        // cell, so a built-in table style is not a default to fall back on —
+        // it is a second opinion layered on top of ours. The old id was
+        // Medium Style 2 Accent 1, whose banding fought the striping below it.
+        $tblPr = '<a:tblPr' . ($table['hasHeader'] ? ' firstRow="1"' : '')
+            . '><a:tableStyleId>{2D5ABB26-0587-4C30-8999-92F81FD0307C}</a:tableStyleId></a:tblPr>';
 
         return '<p:graphicFrame>'
             . '<p:nvGraphicFramePr>'
@@ -1814,10 +1844,9 @@ final class PptxWriter
             . '<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
             . '<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table">'
             . '<a:tbl>'
-            . '<a:tblPr firstRow="1" bandRow="1"><a:tableStyleId>{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}</a:tableStyleId></a:tblPr>'
+            . $tblPr
             . '<a:tblGrid>' . $gridCols . '</a:tblGrid>'
-            . $headerRow
-            . $bodyRows
+            . $rowsXml
             . '</a:tbl>'
             . '</a:graphicData>'
             . '</a:graphic>'
@@ -1825,31 +1854,111 @@ final class PptxWriter
     }
 
     /**
-     * Build a single `<a:tc>` table cell. Header cells get a violet fill +
-     * white bold text; striped body rows get a subtle tint.
+     * Serialise one resolved cell. Makes no styling decisions — every value
+     * here was decided by {@see TableResolver}.
+     *
+     * Two things in here are load-bearing and easy to get wrong:
+     *
+     *   - `gridSpan` / `rowSpan` / `hMerge` / `vMerge` are attributes of
+     *     `<a:tc>`, NOT of `<a:tcPr>`. On `tcPr` they parse fine and are
+     *     silently ignored, so the table renders unmerged with no error.
+     *   - `<a:tcPr>` has a FIXED child order: lnL, lnR, lnT, lnB, then the
+     *     fill. Emitting the fill first produces a file whose fill a reader
+     *     drops on the floor.
+     *
+     * @param  array<string, mixed>  $cell
      */
-    private function buildTableCell(string $text, bool $header, bool $striped = false): string
+    private function buildTableCell(array $cell): string
     {
-        if ($header) {
-            $fill = '<a:solidFill><a:srgbClr val="8B5CF6"/></a:solidFill>';
-            $textColor = 'FFFFFF';
-            $bold = ' b="1"';
-        } else {
-            $fill = $striped
-                ? '<a:solidFill><a:srgbClr val="F8FAFC"/></a:solidFill>'
-                : '<a:noFill/>';
-            $textColor = '0F172A';
-            $bold = '';
+        $attrs = '';
+        if ($cell['colSpan'] > 1) {
+            $attrs .= ' gridSpan="' . $cell['colSpan'] . '"';
+        }
+        if ($cell['rowSpan'] > 1) {
+            $attrs .= ' rowSpan="' . $cell['rowSpan'] . '"';
+        }
+        if ($cell['merged'] === 'horizontal' || $cell['merged'] === 'both') {
+            $attrs .= ' hMerge="1"';
+        }
+        if ($cell['merged'] === 'vertical' || $cell['merged'] === 'both') {
+            $attrs .= ' vMerge="1"';
         }
 
-        return '<a:tc>'
+        $pad = $cell['padding'];
+        $tcPrAttrs = ' marL="' . Emu::fromPt((float) $pad['left']) . '"'
+            . ' marR="' . Emu::fromPt((float) $pad['right']) . '"'
+            . ' marT="' . Emu::fromPt((float) $pad['top']) . '"'
+            . ' marB="' . Emu::fromPt((float) $pad['bottom']) . '"'
+            . ' anchor="' . self::ANCHOR_ATTR[$cell['anchor']] . '"';
+
+        // "No border" is STATED, never left out. An absent `<a:lnL>` is not an
+        // absent rule — it is an unspecified one, and a reader fills it in from
+        // its own default table style. LibreOffice draws a full grid over a
+        // table carrying no line elements at all, which is exactly how a
+        // `borders: false` metadata panel came back fully ruled.
+        $borders = '';
+        foreach (['left' => 'L', 'right' => 'R', 'top' => 'T', 'bottom' => 'B'] as $side => $suffix) {
+            $spec = $cell['borders'][$side] ?? null;
+            if ($spec === null) {
+                $borders .= '<a:ln' . $suffix . '><a:noFill/></a:ln' . $suffix . '>';
+
+                continue;
+            }
+            $borders .= '<a:ln' . $suffix . ' w="' . Emu::fromPt((float) $spec['width']) . '" cap="flat" cmpd="sng" algn="ctr">'
+                . '<a:solidFill><a:srgbClr val="' . $spec['color'] . '"/></a:solidFill>'
+                . '<a:prstDash val="' . $spec['style'] . '"/>'
+                . '</a:ln' . $suffix . '>';
+        }
+
+        $fill = $cell['fill'] === null
+            ? '<a:noFill/>'
+            : '<a:solidFill><a:srgbClr val="' . $cell['fill'] . '"/></a:solidFill>';
+
+        return '<a:tc' . $attrs . '>'
             . '<a:txBody>'
-            . '<a:bodyPr wrap="square" anchor="ctr" lIns="91440" tIns="45720" rIns="91440" bIns="45720"/>'
+            . '<a:bodyPr/>'
             . '<a:lstStyle/>'
-            . '<a:p><a:pPr algn="l"/><a:r><a:rPr lang="en-US" sz="1400"' . $bold . '><a:solidFill><a:srgbClr val="' . $textColor . '"/></a:solidFill></a:rPr><a:t>' . Xml::text($text) . '</a:t></a:r></a:p>'
+            . '<a:p><a:pPr algn="' . self::ALIGN_ATTR[$cell['align']] . '"/>'
+            . $this->buildCellRun($cell)
+            . '</a:p>'
             . '</a:txBody>'
-            . '<a:tcPr>' . $fill . '</a:tcPr>'
+            . '<a:tcPr' . $tcPrAttrs . '>' . $borders . $fill . '</a:tcPr>'
             . '</a:tc>';
+    }
+
+    /** @param array<string, mixed> $cell */
+    private function buildCellRun(array $cell): string
+    {
+        $rPr = '<a:rPr lang="en-US" sz="' . Emu::hundredthsOfPoint((float) $cell['fontSize']) . '"';
+        if ($cell['bold']) {
+            $rPr .= ' b="1"';
+        }
+        if ($cell['italic']) {
+            $rPr .= ' i="1"';
+        }
+        if ($cell['underline']) {
+            $rPr .= ' u="sng"';
+        }
+        if ((float) $cell['letterSpacing'] !== 0.0) {
+            $rPr .= ' spc="' . Emu::hundredthsOfPoint((float) $cell['letterSpacing']) . '"';
+        }
+        if ($cell['caps'] !== 'none') {
+            $rPr .= ' cap="' . $cell['caps'] . '"';
+        }
+        $rPr .= '>';
+        $rPr .= '<a:solidFill><a:srgbClr val="' . $cell['color'] . '"/></a:solidFill>';
+        if ($cell['fontFamily'] !== null) {
+            $rPr .= '<a:latin typeface="' . Xml::attr((string) $cell['fontFamily']) . '"/>';
+        }
+        $rPr .= '</a:rPr>';
+
+        // An empty run is legal but PowerPoint prefers an endParaRPr for a
+        // genuinely empty cell — and a merged continuation cell is always one.
+        if ($cell['text'] === '') {
+            return '<a:endParaRPr lang="en-US" sz="' . Emu::hundredthsOfPoint((float) $cell['fontSize']) . '"/>';
+        }
+
+        return '<a:r>' . $rPr . '<a:t>' . Xml::text((string) $cell['text']) . '</a:t></a:r>';
     }
 
     // ─── Charts ───────────────────────────────────────────────────────────
@@ -2372,6 +2481,9 @@ final class PptxWriter
         };
 
         $renderRuns = $format === 'markdown';
+        $spacing = $this->paragraphSpacing($style);
+        $bullet = $this->bulletMarkup($style['bullet'] ?? null);
+        $runExtra = $this->runExtraAttrs($style);
 
         $paragraphs = '';
         $lines = explode("\n", $content);
@@ -2405,28 +2517,26 @@ final class PptxWriter
             }
 
             $pPr = '<a:pPr algn="' . $align . '"';
-            if ($isBullet) {
-                $pPr .= ' indent="-228600" marL="228600"><a:buFont typeface="Arial"/><a:buChar char="•"/>';
-            } else {
-                $pPr .= '><a:buNone/>';
-            }
+            $pPr .= $isBullet ? ' indent="-228600" marL="228600">' : '>';
+            $pPr .= $spacing;
+            $pPr .= $isBullet ? $bullet : '<a:buNone/>';
             $pPr .= '</a:pPr>';
 
             $runs = '';
             if ($renderRuns) {
                 $tokens = MarkdownInline::tokenize($body);
                 foreach ($tokens as $token) {
-                    $runs .= $this->buildRun($token['text'], $paragraphSz, $paragraphBold, $baseItalic, $baseUnderline, $colorHex, $fontFamily, $token['b'], $token['i'], $token['code']);
+                    $runs .= $this->buildRun($token['text'], $paragraphSz, $paragraphBold, $baseItalic, $baseUnderline, $colorHex, $fontFamily, $token['b'], $token['i'], $token['code'], $runExtra);
                 }
             } else {
-                $runs = $this->buildRun($body, $paragraphSz, $paragraphBold, $baseItalic, $baseUnderline, $colorHex, $fontFamily, false, false, false);
+                $runs = $this->buildRun($body, $paragraphSz, $paragraphBold, $baseItalic, $baseUnderline, $colorHex, $fontFamily, false, false, false, $runExtra);
             }
 
             $paragraphs .= '<a:p>' . $pPr . $runs . '</a:p>';
         }
 
         return '<p:txBody>'
-            . '<a:bodyPr wrap="square" anchor="' . substr($anchor, 3, -1) . '" rtlCol="0"/>'
+            . '<a:bodyPr wrap="square" anchor="' . substr($anchor, 3, -1) . '" rtlCol="0"' . BoxDecoration::bodyInsets($style) . '/>'
             . '<a:lstStyle/>'
             . $paragraphs
             . '</p:txBody>';
@@ -2441,7 +2551,7 @@ final class PptxWriter
      * base weight even when the surrounding text was non-bold; inline
      * `*italic*` is additive.
      */
-    private function buildRun(string $text, int $sz, string $baseBold, string $baseItalic, string $baseUnderline, string $colorHex, string $fontFamily, bool $bold, bool $italic, bool $code): string
+    private function buildRun(string $text, int $sz, string $baseBold, string $baseItalic, string $baseUnderline, string $colorHex, string $fontFamily, bool $bold, bool $italic, bool $code, string $extra = ''): string
     {
         $b = $bold ? ' b="1"' : $baseBold;
         $i = ($italic ? ' i="1"' : '') ?: $baseItalic;
@@ -2455,9 +2565,80 @@ final class PptxWriter
             $family = '<a:latin typeface="Consolas"/>';
         }
 
-        $rPr = '<a:rPr lang="en-US" sz="' . $sz . '"' . $b . $i . $u . '><a:solidFill><a:srgbClr val="' . $color . '"/></a:solidFill>' . $family . '</a:rPr>';
+        $rPr = '<a:rPr lang="en-US" sz="' . $sz . '"' . $b . $i . $u . $extra . '><a:solidFill><a:srgbClr val="' . $color . '"/></a:solidFill>' . $family . '</a:rPr>';
 
         return '<a:r>' . $rPr . '<a:t>' . Xml::text($text) . '</a:t></a:r>';
+    }
+
+    /**
+     * `<a:lnSpc>` / `<a:spcBef>` / `<a:spcAft>` for a paragraph.
+     *
+     * `lineHeight` is a MULTIPLE (1.4 = 140%), matching CSS and the fancy-slides
+     * editor; `spaceBefore` / `spaceAfter` are points. Empty when the style is
+     * silent, so decks that predate this keep their bytes.
+     *
+     * @param  array<string, mixed>  $style
+     */
+    private function paragraphSpacing(array $style): string
+    {
+        $out = '';
+        if (isset($style['lineHeight']) && is_numeric($style['lineHeight'])) {
+            $pct = (int) round((float) $style['lineHeight'] * 100000);
+            $out .= '<a:lnSpc><a:spcPct val="' . $pct . '"/></a:lnSpc>';
+        }
+        if (isset($style['spaceBefore']) && is_numeric($style['spaceBefore'])) {
+            $out .= '<a:spcBef><a:spcPts val="' . Emu::hundredthsOfPoint((float) $style['spaceBefore']) . '"/></a:spcBef>';
+        }
+        if (isset($style['spaceAfter']) && is_numeric($style['spaceAfter'])) {
+            $out .= '<a:spcAft><a:spcPts val="' . Emu::hundredthsOfPoint((float) $style['spaceAfter']) . '"/></a:spcAft>';
+        }
+
+        return $out;
+    }
+
+    /**
+     * The bullet markup for a list paragraph.
+     *
+     * `none` suppresses it, `number` makes an auto-numbered list, and anything
+     * else is taken as the literal character — which is all a check-mark list
+     * is. The default stays the round bullet the writer has always emitted.
+     */
+    private function bulletMarkup(mixed $bullet): string
+    {
+        if ($bullet === null || $bullet === '') {
+            return '<a:buFont typeface="Arial"/><a:buChar char="•"/>';
+        }
+        if ($bullet === 'none' || $bullet === false) {
+            return '<a:buNone/>';
+        }
+        if ($bullet === 'number') {
+            return '<a:buAutoNum type="arabicPeriod"/>';
+        }
+
+        return '<a:buFont typeface="Arial"/><a:buChar char="' . Xml::attr((string) $bullet) . '"/>';
+    }
+
+    /**
+     * Run attributes that apply to every run in the body: letter spacing and
+     * capitalisation. Both are `<a:rPr>` attributes, so they have to be built
+     * as a string and appended rather than nested.
+     *
+     * @param  array<string, mixed>  $style
+     */
+    private function runExtraAttrs(array $style): string
+    {
+        $out = '';
+        if (isset($style['letterSpacing']) && is_numeric($style['letterSpacing'])) {
+            $out .= ' spc="' . Emu::hundredthsOfPoint((float) $style['letterSpacing']) . '"';
+        }
+        $caps = $style['caps'] ?? null;
+        if ($caps === 'small') {
+            $out .= ' cap="small"';
+        } elseif ($caps === 'all' || $caps === 'upper') {
+            $out .= ' cap="all"';
+        }
+
+        return $out;
     }
 
     /** @param mixed $weight */

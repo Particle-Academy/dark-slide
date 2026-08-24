@@ -589,20 +589,38 @@ final class PptxReader
             return null;
         }
 
-        // Header row → columns
-        $headerCells = $rows[0]->xpath('.//a:tc') ?: [];
+        // Whether row 0 is a header is DECLARED, not assumed. `a:tblPr/@firstRow`
+        // is the only thing that says so, and header-less tables are ordinary
+        // now — every metadataGrid and kpiBand is one. Assuming a header
+        // promoted a row of DATA to column labels and dropped it from the rows,
+        // silently losing content on the way back in.
+        $tblPr = $tbl->xpath('a:tblPr')[0] ?? null;
+        $hasHeader = $tblPr !== null && (string) ($tblPr['firstRow'] ?? '0') === '1';
+
+        // Column widths come from the grid, as fractions of the table, so a
+        // table written with unequal columns reads back with them.
+        $gridCols = $tbl->xpath('a:tblGrid/a:gridCol') ?: [];
+        $gridWidths = array_map(fn ($c) => (int) $c['w'], $gridCols);
+        $gridTotal = array_sum($gridWidths);
+
+        $firstCells = $rows[0]->xpath('.//a:tc') ?: [];
+        $columnCount = max(count($firstCells), count($gridWidths));
+
         $columns = [];
-        foreach ($headerCells as $i => $cell) {
-            $label = $this->cellText($cell);
-            $columns[] = [
+        for ($i = 0; $i < $columnCount; $i++) {
+            $column = [
                 'key' => 'col' . ($i + 1),
-                'label' => $label,
+                'label' => $hasHeader && isset($firstCells[$i]) ? $this->cellText($firstCells[$i]) : '',
             ];
+            if ($gridTotal > 0 && isset($gridWidths[$i])) {
+                $column['width'] = $gridWidths[$i] / $gridTotal;
+            }
+            $columns[] = $column;
         }
 
         // Body rows
         $bodyRows = [];
-        for ($r = 1; $r < count($rows); $r++) {
+        for ($r = $hasHeader ? 1 : 0; $r < count($rows); $r++) {
             $rowCells = $rows[$r]->xpath('.//a:tc') ?: [];
             $rowData = [];
             foreach ($columns as $i => $col) {

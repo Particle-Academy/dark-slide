@@ -20,8 +20,17 @@ final class Schema
 {
     public const VERSION = '0.1.0';
 
-    /** Supported element types. */
-    public const ELEMENT_TYPES = ['text', 'image', 'chart', 'code', 'table', 'shape', 'embed'];
+    /**
+     * Supported element types.
+     *
+     * `kpiBand` and `metadataGrid` are COMPOSITES: they expand into a `table`
+     * before the writer serialises anything, so they add no OOXML surface and
+     * read back as the table they became. See `Table\Composites`.
+     */
+    public const ELEMENT_TYPES = ['text', 'image', 'chart', 'code', 'table', 'shape', 'embed', 'kpiBand', 'metadataGrid'];
+
+    /** The subset of ELEMENT_TYPES that is sugar over a `table`. */
+    public const COMPOSITE_ELEMENT_TYPES = ['kpiBand', 'metadataGrid'];
 
     /** Layout presets the writer recognises. Unknown layouts fall back to free placement. */
     public const SLIDE_LAYOUTS = [

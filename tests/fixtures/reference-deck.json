@@ -1,0 +1,890 @@
+{
+  "id": "rich-constructs-reference",
+  "title": "Field Operations Platform - Business Case & ROI Analysis",
+  "metadata": {
+    "author": "dark-slide reference fixture"
+  },
+  "theme": {
+    "name": "reference",
+    "colors": {
+      "background": "#FFFFFF",
+      "text": "#0F1E2E",
+      "muted": "#5A6B7C",
+      "accent": "#0E7C86",
+      "surface": "#F1F5F9"
+    }
+  },
+  "slides": [
+    {
+      "id": "s1-title",
+      "layout": "title",
+      "elements": [
+        {
+          "id": "eyebrow",
+          "type": "text",
+          "x": 0.07,
+          "y": 0.09,
+          "w": 0.6,
+          "h": 0.07,
+          "content": "Example Industries",
+          "format": "plain",
+          "style": {
+            "fontSize": 20,
+            "color": "#0E7C86",
+            "weight": "bold",
+            "letterSpacing": 2.4,
+            "caps": "small"
+          }
+        },
+        {
+          "id": "title",
+          "type": "text",
+          "x": 0.07,
+          "y": 0.16,
+          "w": 0.86,
+          "h": 0.16,
+          "content": "Field Operations Platform",
+          "format": "plain",
+          "style": {
+            "fontSize": 88,
+            "weight": "bold",
+            "color": "#0F1E2E"
+          }
+        },
+        {
+          "id": "rule",
+          "type": "shape",
+          "shape": "rect",
+          "x": 0.07,
+          "y": 0.325,
+          "w": 0.86,
+          "h": 0.005,
+          "fill": "#0E7C86",
+          "stroke": "none"
+        },
+        {
+          "id": "subtitle",
+          "type": "text",
+          "x": 0.07,
+          "y": 0.345,
+          "w": 0.86,
+          "h": 0.1,
+          "content": "Business Case & ROI Analysis",
+          "format": "plain",
+          "style": {
+            "fontSize": 48,
+            "weight": "bold",
+            "color": "#1B3A5C"
+          }
+        },
+        {
+          "id": "meta",
+          "type": "metadataGrid",
+          "x": 0.07,
+          "y": 0.5,
+          "w": 0.86,
+          "h": 0.36,
+          "columns": 3,
+          "items": [
+            {
+              "label": "Prepared by",
+              "value": "Operations Analysis"
+            },
+            {
+              "label": "Engagement",
+              "value": "New"
+            },
+            {
+              "label": "Annual investment",
+              "value": "$15,000-$20,000"
+            },
+            {
+              "label": "Business unit",
+              "value": "Facilities"
+            },
+            {
+              "label": "Date",
+              "value": "June 2026"
+            },
+            {
+              "label": "Plan",
+              "value": "Standard"
+            }
+          ],
+          "style": {
+            "fill": "#F1F5F9",
+            "labelColor": "#5A6B7C",
+            "valueColor": "#0F1E2E"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s2-summary",
+      "layout": "title-content",
+      "elements": [
+        {
+          "id": "h",
+          "type": "text",
+          "x": 0.07,
+          "y": 0.07,
+          "w": 0.86,
+          "h": 0.1,
+          "content": "Executive Summary",
+          "format": "plain",
+          "style": {
+            "fontSize": 56,
+            "weight": "bold",
+            "color": "#1B3A5C"
+          }
+        },
+        {
+          "id": "body",
+          "type": "text",
+          "x": 0.07,
+          "y": 0.19,
+          "w": 0.86,
+          "h": 0.22,
+          "format": "markdown",
+          "content": "The estate runs 350 sites and 35,000 devices on static drawings, hand-kept spreadsheets and PDF handoffs. With a five-year refresh underway and new sites in build, the cost of the current workflow is accelerating rather than holding steady.\nA single system of record removes the manual drawing burden, replaces spreadsheet lifecycle tracking, and becomes the living record for every site.",
+          "style": {
+            "fontSize": 26,
+            "color": "#0F1E2E",
+            "lineHeight": 1.25,
+            "spaceAfter": 6
+          }
+        },
+        {
+          "id": "kpis",
+          "type": "kpiBand",
+          "x": 0.07,
+          "y": 0.48,
+          "w": 0.86,
+          "h": 0.24,
+          "items": [
+            {
+              "value": "$51K-$68K",
+              "caption": "Annual cost of the current workflow"
+            },
+            {
+              "value": "$31K-$48K",
+              "caption": "Estimated annual savings"
+            },
+            {
+              "value": "155%-240%",
+              "caption": "Estimated year 1 ROI"
+            },
+            {
+              "value": "3-5 months",
+              "caption": "Estimated payback period"
+            }
+          ],
+          "style": {
+            "fill": "#F4F8F8",
+            "valueColor": "#1B3A5C",
+            "captionColor": "#5A6B7C",
+            "valueFontSize": 44
+          }
+        },
+        {
+          "id": "callout",
+          "type": "text",
+          "x": 0.07,
+          "y": 0.755,
+          "w": 0.86,
+          "h": 0.19,
+          "format": "markdown",
+          "content": "### Core recommendation\nAdopt one platform as the system of record for drawings, lifecycle data and vendor collaboration across the whole estate.",
+          "style": {
+            "fontSize": 24,
+            "color": "#0F1E2E",
+            "fill": "#E8F2F3",
+            "accentBar": {
+              "color": "#0E7C86",
+              "width": 5
+            },
+            "padding": {
+              "top": 8,
+              "bottom": 8,
+              "right": 14
+            },
+            "lineHeight": 1.2
+          }
+        }
+      ]
+    },
+    {
+      "id": "s3-current-state",
+      "layout": "title-content",
+      "elements": [
+        {
+          "id": "h",
+          "type": "text",
+          "x": 0.07,
+          "y": 0.06,
+          "w": 0.86,
+          "h": 0.09,
+          "content": "1.  Current-State Cost",
+          "format": "plain",
+          "style": {
+            "fontSize": 52,
+            "weight": "bold",
+            "color": "#1B3A5C"
+          }
+        },
+        {
+          "id": "sub",
+          "type": "text",
+          "x": 0.07,
+          "y": 0.17,
+          "w": 0.86,
+          "h": 0.06,
+          "content": "Annual project volume",
+          "format": "plain",
+          "style": {
+            "fontSize": 30,
+            "weight": "bold",
+            "color": "#0E7C86"
+          }
+        },
+        {
+          "id": "t",
+          "type": "table",
+          "x": 0.07,
+          "y": 0.25,
+          "w": 0.86,
+          "h": 0.66,
+          "columns": [
+            {
+              "key": "type",
+              "label": "Project type",
+              "width": 2.4
+            },
+            {
+              "key": "vol",
+              "label": "Annual volume",
+              "width": 1.3,
+              "align": "right"
+            },
+            {
+              "key": "hrs",
+              "label": "Avg. hours / drawing",
+              "width": 1.6,
+              "align": "right"
+            },
+            {
+              "key": "tot",
+              "label": "Total hours",
+              "width": 1.3,
+              "align": "right"
+            }
+          ],
+          "rows": [
+            {
+              "type": "New sites",
+              "vol": "2-6",
+              "hrs": "4 hrs",
+              "tot": "8-24 hrs"
+            },
+            {
+              "type": "Remodels",
+              "vol": "2-10",
+              "hrs": "8 hrs",
+              "tot": "16-80 hrs"
+            },
+            {
+              "type": "Kiosk changeouts",
+              "vol": "30-40",
+              "hrs": "2 hrs",
+              "tot": "60-80 hrs"
+            },
+            {
+              "type": "Net new kiosks",
+              "vol": "12",
+              "hrs": "2 hrs",
+              "tot": "24 hrs"
+            },
+            {
+              "type": "Small projects",
+              "vol": "20-100",
+              "hrs": "1-2 hrs",
+              "tot": "20-200 hrs"
+            },
+            {
+              "type": "Lifecycle projects",
+              "vol": "100",
+              "hrs": "1-2 hrs",
+              "tot": "100-200 hrs"
+            },
+            {
+              "cells": {
+                "type": "Total estimated",
+                "vol": "",
+                "hrs": "",
+                "tot": "228-608 hrs/year"
+              },
+              "fill": "#0E7C86",
+              "color": "#FFFFFF",
+              "bold": true
+            }
+          ],
+          "style": {
+            "fontSize": 24,
+            "rowHeight": 24,
+            "header": {
+              "fill": "#1B3A5C",
+              "height": 28,
+              "letterSpacing": 0.4
+            },
+            "stripe": {
+              "fill": "#F1F5F9"
+            },
+            "borders": {
+              "inner": {
+                "width": 0.5,
+                "color": "#D8E0E8"
+              },
+              "outer": {
+                "width": 0.75,
+                "color": "#C4CFDA"
+              }
+            },
+            "padding": {
+              "left": 9,
+              "right": 9,
+              "top": 2,
+              "bottom": 2
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "s4-error-cost",
+      "layout": "title-content",
+      "elements": [
+        {
+          "id": "sub",
+          "type": "text",
+          "x": 0.07,
+          "y": 0.07,
+          "w": 0.86,
+          "h": 0.07,
+          "content": "The error cost: change orders and device miscounts",
+          "format": "plain",
+          "style": {
+            "fontSize": 34,
+            "weight": "bold",
+            "color": "#0E7C86"
+          }
+        },
+        {
+          "id": "bullets",
+          "type": "text",
+          "x": 0.07,
+          "y": 0.17,
+          "w": 0.86,
+          "h": 0.24,
+          "format": "markdown",
+          "content": "- Device counts are kept by hand and edited across many sessions.\n- A camera runs to roughly $2,000 per device.\n- Missing five devices a year creates about $10,000 in change orders.",
+          "style": {
+            "fontSize": 26,
+            "color": "#0F1E2E",
+            "lineHeight": 1.35,
+            "spaceAfter": 2
+          }
+        },
+        {
+          "id": "t",
+          "type": "table",
+          "x": 0.07,
+          "y": 0.45,
+          "w": 0.86,
+          "h": 0.4,
+          "columns": [
+            {
+              "key": "kind",
+              "label": "Change order type",
+              "width": 2.2
+            },
+            {
+              "key": "vol",
+              "label": "Annual volume",
+              "width": 1.2,
+              "align": "right"
+            },
+            {
+              "key": "cost",
+              "label": "Estimated cost impact",
+              "width": 2.0,
+              "align": "right"
+            }
+          ],
+          "rows": [
+            {
+              "kind": "Scope changes requiring a new drawing",
+              "vol": "5-10/year",
+              "cost": "$5,000-$15,000+ in rework"
+            },
+            {
+              "kind": "Device miscount errors",
+              "vol": "4-5/year",
+              "cost": "Approximately $8,000-$10,000"
+            },
+            {
+              "cells": {
+                "kind": "Total annual impact",
+                "vol": "",
+                "cost": "Approximately $13,000-$25,000"
+              },
+              "fill": "#0E7C86",
+              "color": "#FFFFFF",
+              "bold": true
+            }
+          ],
+          "style": {
+            "fontSize": 24,
+            "rowHeight": 26,
+            "header": {
+              "fill": "#1B3A5C",
+              "height": 28
+            },
+            "stripe": {
+              "fill": "#F1F5F9"
+            },
+            "borders": {
+              "inner": {
+                "width": 0.5,
+                "color": "#D8E0E8"
+              },
+              "outer": {
+                "width": 0.75,
+                "color": "#C4CFDA"
+              }
+            },
+            "padding": {
+              "left": 9,
+              "right": 9,
+              "top": 2,
+              "bottom": 2
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "s5-requirements",
+      "layout": "title-content",
+      "elements": [
+        {
+          "id": "sub",
+          "type": "text",
+          "x": 0.07,
+          "y": 0.07,
+          "w": 0.86,
+          "h": 0.07,
+          "content": "What the estate requires",
+          "format": "plain",
+          "style": {
+            "fontSize": 34,
+            "weight": "bold",
+            "color": "#0E7C86"
+          }
+        },
+        {
+          "id": "checks",
+          "type": "text",
+          "x": 0.07,
+          "y": 0.18,
+          "w": 0.86,
+          "h": 0.34,
+          "format": "markdown",
+          "content": "- Usable from project creation through completion.\n- Works offline, in the field, with no connection.\n- Easy to file and share across teams and vendors.\n- A living document for all 350 sites.",
+          "style": {
+            "fontSize": 27,
+            "color": "#0F1E2E",
+            "bullet": "✓",
+            "lineHeight": 1.5
+          }
+        },
+        {
+          "id": "callout",
+          "type": "text",
+          "x": 0.07,
+          "y": 0.6,
+          "w": 0.86,
+          "h": 0.24,
+          "format": "markdown",
+          "content": "### Platform fit\nOne platform satisfies all four requirements natively. A general-purpose drawing tool does not, in a domain-specific context.",
+          "style": {
+            "fontSize": 24,
+            "color": "#0F1E2E",
+            "fill": "#E8F2F3",
+            "accentBar": {
+              "color": "#0E7C86",
+              "width": 5
+            },
+            "padding": {
+              "top": 10,
+              "bottom": 10,
+              "right": 14
+            },
+            "lineHeight": 1.2
+          }
+        }
+      ]
+    },
+    {
+      "id": "s6-cost-of-inaction",
+      "layout": "title-content",
+      "elements": [
+        {
+          "id": "h",
+          "type": "text",
+          "x": 0.07,
+          "y": 0.07,
+          "w": 0.86,
+          "h": 0.09,
+          "content": "2.  Total Cost of Inaction",
+          "format": "plain",
+          "style": {
+            "fontSize": 52,
+            "weight": "bold",
+            "color": "#1B3A5C"
+          }
+        },
+        {
+          "id": "t",
+          "type": "table",
+          "x": 0.07,
+          "y": 0.24,
+          "w": 0.86,
+          "h": 0.5,
+          "columns": [
+            {
+              "key": "cat",
+              "label": "Cost category",
+              "width": 2.6
+            },
+            {
+              "key": "est",
+              "label": "Annual estimate",
+              "width": 1.4,
+              "align": "right"
+            }
+          ],
+          "rows": [
+            {
+              "cat": "Drawing labour: manual workflow",
+              "est": "$21,000 midpoint"
+            },
+            {
+              "cat": "Change orders: scope changes and miscounts",
+              "est": "$13,000-$25,000"
+            },
+            {
+              "cat": "Lifecycle management labour: spreadsheets",
+              "est": "$17,000-$22,000"
+            },
+            {
+              "cells": {
+                "cat": "Total estimated annual cost",
+                "est": "$51,000-$68,000"
+              },
+              "fill": "#0E7C86",
+              "color": "#FFFFFF",
+              "bold": true,
+              "letterSpacing": 0.6,
+              "height": 34
+            }
+          ],
+          "style": {
+            "fontSize": 26,
+            "rowHeight": 30,
+            "header": {
+              "fill": "#1B3A5C",
+              "height": 32
+            },
+            "stripe": {
+              "fill": "#F1F5F9"
+            },
+            "borders": {
+              "inner": {
+                "width": 0.5,
+                "color": "#D8E0E8"
+              },
+              "outer": {
+                "width": 0.75,
+                "color": "#C4CFDA"
+              }
+            },
+            "padding": {
+              "left": 10,
+              "right": 10,
+              "top": 3,
+              "bottom": 3
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "s7-comparison",
+      "layout": "title-content",
+      "elements": [
+        {
+          "id": "h",
+          "type": "text",
+          "x": 0.07,
+          "y": 0.05,
+          "w": 0.86,
+          "h": 0.09,
+          "content": "3.  How the Platform Removes Cost",
+          "format": "plain",
+          "style": {
+            "fontSize": 48,
+            "weight": "bold",
+            "color": "#1B3A5C"
+          }
+        },
+        {
+          "id": "t",
+          "type": "table",
+          "x": 0.07,
+          "y": 0.17,
+          "w": 0.86,
+          "h": 0.76,
+          "columns": [
+            {
+              "key": "pain",
+              "label": "Current pain point",
+              "width": 1.5
+            },
+            {
+              "key": "cap",
+              "label": "Platform capability",
+              "width": 1.8
+            },
+            {
+              "key": "impact",
+              "label": "Expected cost impact",
+              "width": 1.5
+            }
+          ],
+          "rows": [
+            {
+              "pain": "4 hours to draw a new site",
+              "cap": "Pre-built device library, drag-and-drop design and auto-BOM",
+              "impact": "60%-75% time reduction"
+            },
+            {
+              "pain": "8 hours for remodel drawings",
+              "cap": "Phased drawings and living-document updates, no re-creation",
+              "impact": "50%-70% time reduction"
+            },
+            {
+              "pain": "Device miscount errors",
+              "cap": "Automated counts and a BOM generated from the design",
+              "impact": "Removes $8,000-$10,000/year"
+            },
+            {
+              "pain": "Spreadsheet lifecycle tracking",
+              "cap": "Digital as-built with warranty dates and projected end-of-life",
+              "impact": "Recovers 200-400 hours/year"
+            },
+            {
+              "pain": "PDF handoffs to vendors",
+              "cap": "Guest sharing with read-only access and live field updates",
+              "impact": "Less coordination friction"
+            }
+          ],
+          "style": {
+            "fontSize": 22,
+            "rowHeight": 34,
+            "anchor": "top",
+            "header": {
+              "fill": "#1B3A5C",
+              "height": 26,
+              "anchor": "middle"
+            },
+            "stripe": {
+              "fill": "#F1F5F9"
+            },
+            "borders": {
+              "inner": {
+                "width": 0.5,
+                "color": "#D8E0E8"
+              },
+              "outer": {
+                "width": 0.75,
+                "color": "#C4CFDA"
+              }
+            },
+            "padding": {
+              "left": 9,
+              "right": 9,
+              "top": 5,
+              "bottom": 5
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "s8-roi",
+      "layout": "title-content",
+      "elements": [
+        {
+          "id": "h",
+          "type": "text",
+          "x": 0.07,
+          "y": 0.06,
+          "w": 0.86,
+          "h": 0.09,
+          "content": "4.  ROI Summary",
+          "format": "plain",
+          "style": {
+            "fontSize": 52,
+            "weight": "bold",
+            "color": "#1B3A5C"
+          }
+        },
+        {
+          "id": "t",
+          "type": "table",
+          "x": 0.07,
+          "y": 0.2,
+          "w": 0.86,
+          "h": 0.42,
+          "columns": [
+            {
+              "key": "metric",
+              "label": "Metric",
+              "width": 2.6
+            },
+            {
+              "key": "value",
+              "label": "Value",
+              "width": 1.4,
+              "align": "right"
+            }
+          ],
+          "rows": [
+            {
+              "metric": "Estimated annual cost of the current workflow",
+              "value": "$51,000-$68,000/year"
+            },
+            {
+              "metric": "Platform annual investment",
+              "value": "$15,000-$20,000/year"
+            },
+            {
+              "cells": {
+                "metric": "Estimated annual savings",
+                "value": "$31,000-$48,000/year"
+              },
+              "fill": "#E8F2F3"
+            },
+            {
+              "metric": "Estimated year 1 ROI",
+              "value": "155%-240%"
+            },
+            {
+              "cells": {
+                "metric": "Estimated payback period",
+                "value": "3-5 months"
+              },
+              "fill": "#E8F2F3"
+            }
+          ],
+          "style": {
+            "fontSize": 24,
+            "rowHeight": 26,
+            "header": {
+              "fill": "#1B3A5C",
+              "height": 28
+            },
+            "stripe": false,
+            "borders": {
+              "inner": {
+                "width": 0.5,
+                "color": "#D8E0E8"
+              },
+              "outer": {
+                "width": 0.75,
+                "color": "#C4CFDA"
+              }
+            },
+            "padding": {
+              "left": 10,
+              "right": 10,
+              "top": 2,
+              "bottom": 2
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "s9-recommendation",
+      "layout": "section-divider",
+      "elements": [
+        {
+          "id": "h",
+          "type": "text",
+          "x": 0.07,
+          "y": 0.08,
+          "w": 0.86,
+          "h": 0.09,
+          "content": "5.  Risk Profile and Recommendation",
+          "format": "plain",
+          "style": {
+            "fontSize": 46,
+            "weight": "bold",
+            "color": "#1B3A5C"
+          }
+        },
+        {
+          "id": "risks",
+          "type": "text",
+          "x": 0.07,
+          "y": 0.2,
+          "w": 0.86,
+          "h": 0.34,
+          "format": "markdown",
+          "content": "- The refresh continues across 350 sites with no digital system of record.\n- Miscount change orders continue at roughly $8,000-$10,000 a year.\n- Rework accumulates as scopes change; each material change needs a new drawing.\n- The estate falls further behind peers on purpose-built tooling.",
+          "style": {
+            "fontSize": 25,
+            "color": "#0F1E2E",
+            "lineHeight": 1.35
+          }
+        },
+        {
+          "id": "rec",
+          "type": "text",
+          "x": 0.07,
+          "y": 0.63,
+          "w": 0.86,
+          "h": 0.24,
+          "format": "markdown",
+          "content": "### Recommendation\nApprove one standardised platform for design, documentation, device lifecycle management and vendor collaboration across the estate.",
+          "style": {
+            "fontSize": 25,
+            "color": "#0F1E2E",
+            "fill": "#EEF3F8",
+            "accentBar": {
+              "color": "#1B3A5C",
+              "width": 5
+            },
+            "padding": {
+              "top": 10,
+              "bottom": 10,
+              "right": 14
+            },
+            "lineHeight": 1.2
+          }
+        }
+      ]
+    }
+  ]
+}
