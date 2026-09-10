@@ -102,6 +102,25 @@ final class PptxWriter
     /** The deck's theme, kept whole so the table resolver can read its colours. */
     private array $deckTheme = [];
 
+    /**
+     * Monospace typeface for code runs, from `theme.fonts.mono`.
+     *
+     * There is no third slot in OOXML's `<a:fontScheme>` — a theme carries a
+     * major and a minor font and nothing else — so unlike heading and body this
+     * cannot ride along in theme1.xml and has to be written onto each code run.
+     * That is why it was missed: the other two fonts were wired, this one was
+     * accepted by the validator, published in `Schema::jsonSchema()` as part of
+     * the LLM tool definition, described in this class's own docblocks as being
+     * used, and applied nowhere. A deck asking for JetBrains Mono got Consolas.
+     */
+    private string $themeMono = 'Consolas';
+
+    /** Extension uri under which the deck's mono typeface is recorded in theme1.xml. */
+    public const MONO_FONT_EXT_URI = 'urn:particle-academy:dark-slide:mono-font';
+
+    /** Namespace for DarkSlide's own elements inside an `<a:ext>`. */
+    public const NS_DARK_SLIDE = 'urn:particle-academy:dark-slide';
+
     /** `anchor` on `<a:tcPr>` — the vertical anchor of a table cell. */
     private const ANCHOR_ATTR = ['top' => 't', 'middle' => 'ctr', 'bottom' => 'b'];
 
@@ -174,6 +193,8 @@ final class PptxWriter
         $this->pendingSlideRels = [];
         [$this->themeAccent] = Color::parse($deck['theme']['colors']['accent'] ?? '#8B5CF6', '8B5CF6');
         $this->deckTheme = is_array($deck['theme'] ?? null) ? $deck['theme'] : [];
+        $mono = $deck['theme']['fonts']['mono'] ?? '';
+        $this->themeMono = is_string($mono) && trim($mono) !== '' ? trim($mono) : 'Consolas';
 
         $slides = $deck['slides'] ?? [];
         $slideCount = count($slides);
@@ -416,6 +437,8 @@ final class PptxWriter
 
         // Derive a small accent ramp from the deck accent so accent1..6 stay
         // coherent with the brand instead of Office's stock rainbow.
+        $mono = Xml::attr($this->themeMono);
+
         $palette = self::CHART_PALETTE;
         $palette[0] = $accent;
 
@@ -447,6 +470,24 @@ final class PptxWriter
             . '<a:bgFillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:bgFillStyleLst>'
             . '</a:fmtScheme>'
             . '</a:themeElements>'
+            // The mono typeface, recorded so the READER can recognise a code
+            // run again.
+            //
+            // `<a:fontScheme>` has exactly two slots, major and minor, so there
+            // is nowhere in a standard theme for a third font — which is why the
+            // reader used to identify code by SNIFFING the typeface name for
+            // "consola", "mono" or "courier". That was sound while the writer
+            // always emitted Consolas, and stopped being sound the moment a deck
+            // could name its own: "Fira Code" and "Cascadia" match none of those
+            // words, so a code run would have round-tripped back as plain text.
+            //
+            // `<a:extLst>` is the standard place for exactly this. Consumers
+            // that do not know the uri ignore the element, so PowerPoint is
+            // unaffected, and the sniff stays as the fallback for decks written
+            // before this (and by anything else).
+            . '<a:extLst><a:ext uri="' . self::MONO_FONT_EXT_URI . '">'
+            . '<ds:monoFont xmlns:ds="' . self::NS_DARK_SLIDE . '" typeface="' . $mono . '"/>'
+            . '</a:ext></a:extLst>'
             . '</a:theme>';
     }
 
@@ -1771,7 +1812,7 @@ final class PptxWriter
                 $runs .= '<a:r>'
                     . '<a:rPr lang="en-US" sz="' . $sz . '">'
                     . '<a:solidFill><a:srgbClr val="' . $color . '"/></a:solidFill>'
-                    . '<a:latin typeface="Consolas"/>'
+                    . '<a:latin typeface="' . Xml::attr($this->themeMono) . '"/>'
                     . '</a:rPr>'
                     . '<a:t>' . Xml::text($token['text']) . '</a:t>'
                     . '</a:r>';
@@ -2562,7 +2603,7 @@ final class PptxWriter
         if ($code) {
             // Inline code: keep the run inline but switch font + tint.
             $color = '8B5CF6';
-            $family = '<a:latin typeface="Consolas"/>';
+            $family = '<a:latin typeface="' . Xml::attr($this->themeMono) . '"/>';
         }
 
         $rPr = '<a:rPr lang="en-US" sz="' . $sz . '"' . $b . $i . $u . $extra . '><a:solidFill><a:srgbClr val="' . $color . '"/></a:solidFill>' . $family . '</a:rPr>';

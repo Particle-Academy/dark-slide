@@ -34,6 +34,14 @@ final class PptxReader
     /** Current slide's relationships, keyed by rId -> ['type' => ..., 'target' => ...]. */
     private array $currentSlideRels = [];
 
+    /**
+     * The mono typeface this deck was written with, read back from the theme's
+     * `<a:extLst>`. Empty when the package does not record one — anything not
+     * written by a current DarkSlide — in which case the name sniff below is
+     * the only signal available.
+     */
+    private string $monoTypeface = '';
+
     /** ZipArchive being read; held during a single read() call so parsePic can resolve media. */
     private ?ZipArchive $currentZip = null;
 
@@ -92,6 +100,8 @@ final class PptxReader
             'theme' => ['name' => 'imported'],
             'slides' => [],
         ];
+
+        $this->monoTypeface = $this->readMonoTypeface($zip);
 
         // Walk the presentation rel list in order to find slide ids.
         $presentationRels = $zip->getFromName('ppt/_rels/presentation.xml.rels');
@@ -193,6 +203,25 @@ final class PptxReader
         }
 
         return $targets;
+    }
+
+    /**
+     * The mono typeface recorded in `theme1.xml`'s `<a:extLst>`, or `''`.
+     *
+     * Deliberately a regex rather than a parse: this runs before the deck is
+     * built, the element is one attribute deep, and a theme part that does not
+     * carry the extension is the common case rather than an error.
+     */
+    private function readMonoTypeface(ZipArchive $zip): string
+    {
+        $xml = $zip->getFromName('ppt/theme/theme1.xml');
+        if ($xml === false) {
+            return '';
+        }
+
+        return preg_match('/<ds:monoFont[^>]*typeface="([^"]*)"/', $xml, $m) === 1
+            ? html_entity_decode($m[1], ENT_QUOTES | ENT_XML1, 'UTF-8')
+            : '';
     }
 
     private function readCoreTitle(ZipArchive $zip): ?string
@@ -710,7 +739,24 @@ final class PptxReader
                 $latin = $rPr->xpath('a:latin');
                 if (!empty($latin)) {
                     $typeface = strtolower((string) $latin[0]['typeface']);
-                    if (str_contains($typeface, 'consola') || str_contains($typeface, 'mono') || str_contains($typeface, 'courier')) {
+
+                    // Exact match against the typeface the deck RECORDED first,
+                    // then the name sniff.
+                    //
+                    // The sniff alone was sound while the writer always emitted
+                    // Consolas. Once a deck can name its own mono font it is
+                    // not: "Fira Code" and "Cascadia" contain none of these
+                    // words, so a code run came back as plain text — a silent
+                    // downgrade on a document that opened perfectly.
+                    //
+                    // The sniff stays as the fallback, because it is the only
+                    // thing that works for a pptx written by anything else.
+                    $recorded = strtolower($this->monoTypeface);
+
+                    if (($recorded !== '' && $typeface === $recorded)
+                        || str_contains($typeface, 'consola')
+                        || str_contains($typeface, 'mono')
+                        || str_contains($typeface, 'courier')) {
                         $code = true;
                     }
                 }
@@ -729,6 +775,34 @@ final class PptxReader
         if (!$anyNonEmpty) {
             return [$isBullet ? '- ' : '', $isBullet];
         }
+
+        // Coalesce adjacent runs that carry the SAME decoration.
+        //
+        // DrawingML splits text into runs for reasons that have nothing to do
+        // with emphasis — a syntax highlighter emits one run per token, all of
+        // them code — and emitting a marker per run produces markdown that is
+        // not merely ugly but WRONG. A highlighted `const deck = 1;` came back
+        // as "`const`` deck = ``1``;`", where every pair of adjacent backticks
+        // closes one span and opens the next, so re-parsing it yields the
+        // inverse of the intended emphasis.
+        //
+        // Merging first is also what makes the output stable: the same text
+        // reads the same whether the writer split it into one run or six.
+        $merged = [];
+        foreach ($parsed as $run) {
+            $last = $merged !== [] ? array_key_last($merged) : null;
+
+            if ($last !== null
+                && $merged[$last]['b'] === $run['b']
+                && $merged[$last]['i'] === $run['i']
+                && $merged[$last]['code'] === $run['code']) {
+                $merged[$last]['text'] .= $run['text'];
+                continue;
+            }
+
+            $merged[] = $run;
+        }
+        $parsed = $merged;
 
         // Second pass: emit, treating uniform bold/italic as the
         // paragraph default (no markers).

@@ -106,6 +106,36 @@ Six changes alter emitted bytes. Five need nothing from you; one can.
 
 ### Fixed
 
+- **`theme.fonts.mono` now reaches the code it names.** It was accepted by the
+  validator, published in the JSON Schema handed to an LLM as the tool
+  definition, and described in the writer's own docblocks as the font code runs
+  switch to — and applied nowhere. Both places that render code (block elements
+  and inline `` `code` `` spans) hardcoded `Consolas`, so a brand deck asking for
+  JetBrains Mono got Consolas, rendered perfectly, and was quietly off-brand.
+
+  All three engines had it, identically, which is why no parity test caught it:
+  **parity detects disagreement, and they agreed.**
+
+  **What you must do: nothing.** A deck that sets no `fonts.mono` still renders
+  in Consolas, byte for byte as before.
+
+- **A code run written in a brand mono font reads BACK as code.** The reader
+  identified code by looking for "consola", "mono" or "courier" in the typeface
+  name — sound while the writer always emitted Consolas, and not sound once a
+  deck can name its own font, since "Fira Code" and "Cascadia" contain none of
+  those words. The deck's mono typeface is now recorded in `theme1.xml`'s
+  `<a:extLst>` (there is no third slot in `<a:fontScheme>` for it) and matched
+  exactly on read; the name sniff remains the fallback for files written by
+  anything else, including earlier versions of this package.
+
+- **A highlighted line no longer comes back shredded into one span per token.**
+  A syntax highlighter emits one run per token and every one of them is code, so
+  the reader emitted a marker per run: `const deck = 1;` returned with each pair
+  of adjacent backticks closing one span and opening the next, meaning a
+  re-parse yields the INVERSE of the emphasis it was preserving. Adjacent runs
+  carrying the same decoration are now merged before anything is emitted, so the
+  output no longer depends on how many runs the writer split the text into.
+
 - **The reader dropped the first data row of a header-less table.** It assumed
   row 0 was always a header; whether it is one is declared by
   `<a:tblPr firstRow="1">`. Header-less tables only became ordinary with this
