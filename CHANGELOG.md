@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## v0.9.0 — 2026-09-10
+
 Rich document constructs: per-cell table control, decorated text boxes,
 paragraph controls, text inside shapes, and two composite elements. Pre-1.0, so
 this lands in a MINOR.
