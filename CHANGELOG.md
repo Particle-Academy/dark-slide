@@ -54,9 +54,13 @@ a minor.
   fancy-slides). It was ignored, and every rounded rectangle got PowerPoint's
   default corner whatever the deck said.
 
+- **A `rounded-rect` whose `radius` is not a number keeps the default corner**
+  instead of casting to 0 and drawing square corners; and the element `radius`
+  is described in the published schema.
+
 - **The reader reads geometry against the file's own slide size** (`<p:sldSz>`)
-  instead of assuming 16:9, and returns `theme.aspectRatio` for any other shape.
-  A 4:3 deck's `y` of 0.5 used to read back as 0.667.
+  instead of assuming 16:9, and returns `theme.aspectRatio` (always a float) for
+  any other shape. A 4:3 deck's `y` of 0.5 used to read back as 0.667.
 
 - **`Layout::fit` no longer needs `ext-mbstring`.** It called `mb_strlen`, which
   this package never declared.

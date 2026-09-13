@@ -1835,7 +1835,8 @@ final class PptxWriter
         // default 8) instead of PowerPoint's default corner, which it ignored.
         $geometry = $prst === 'roundRect'
             ? BoxDecoration::roundRectGeometry(
-                (float) ($element['radius'] ?? 8),
+                // A radius that is not a number falls back to the default, not to 0.
+                is_numeric($element['radius'] ?? null) ? (float) $element['radius'] : 8.0,
                 Emu::fromFracX((float) ($element['w'] ?? 0)),
                 Emu::fromFracY((float) ($element['h'] ?? 0), $this->slideHeightEmu),
                 $this->deckTheme,

@@ -122,5 +122,12 @@ it('describes the canvas the lengths are measured on', function () {
     $theme = Agent::jsonSchema()['properties']['theme']['properties'];
 
     expect($theme['slideWidth']['description'] ?? '')->toContain('1920 by default')->toContain('1440 reproduces');
+
+    // The three engines publish this text identically and ship different
+    // version numbers, so it must not name one of them.
+    expect($theme['slideWidth']['description'])->not->toMatch('/\b\d+\.\d+\b/');
+
+    $element = Agent::jsonSchema()['properties']['slides']['items']['properties']['elements']['items']['properties'];
+    expect($element['radius']['description'] ?? '')->toContain('design pixels')->toContain('8 by default');
     expect($theme['aspectRatio']['description'] ?? '')->toContain('16/9 by default');
 });

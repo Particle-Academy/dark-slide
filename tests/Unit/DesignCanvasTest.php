@@ -87,6 +87,27 @@ it('rounds a rounded-rect shape by its radius in design pixels', function (?int 
     'larger than the box is a pill, not an overflow' => [4000, 50000],
 ]);
 
+it('treats a radius that is not a number as the default, not as square corners', function () {
+    // (float) "abc" is 0, which drew a rounded-rect with adj 0: a plain rectangle.
+    $shape = ['type' => 'shape', 'shape' => 'rounded-rect', 'w' => 0.3, 'h' => 0.2, 'radius' => 'abc'];
+
+    expect(dcParts(dcDeck([], $shape))['slide'])->toContain('<a:gd name="adj" fmla="val 3704"/>');
+});
+
+it('reads an aspect ratio back as a float, even when it divides exactly', function () {
+    $path = sys_get_temp_dir().'/dc-read-'.bin2hex(random_bytes(4)).'.pptx';
+    Agent::write(dcDeck(['aspectRatio' => 2.0], []), $path);
+
+    try {
+        $deck = Agent::read($path);
+    } finally {
+        @unlink($path);
+    }
+
+    // 9144000 / 4572000 is an exact int division in PHP, which returned int 2.
+    expect($deck['theme']['aspectRatio'])->toBe(2.0);
+});
+
 it('shapes the slide by theme.aspectRatio instead of always writing 16:9', function (float $ratio, string $sldSz, int $yEmu) {
     $parts = dcParts(dcDeck(['aspectRatio' => $ratio], []));
 

@@ -115,7 +115,9 @@ final class PptxReader
         // 16:9 at 10in is the default and says nothing; any other shape is part
         // of the deck and comes back as its aspect ratio.
         if ($this->slideWidthEmu !== Emu::DEFAULT_SLIDE_WIDTH || $this->slideHeightEmu !== Emu::DEFAULT_SLIDE_HEIGHT) {
-            $deck['theme']['aspectRatio'] = $this->slideWidthEmu / $this->slideHeightEmu;
+            // Always a float: `int / int` in PHP is an int when it divides
+            // exactly, so a 2:1 slide read back as `2` and a 4:3 one as a float.
+            $deck['theme']['aspectRatio'] = (float) $this->slideWidthEmu / $this->slideHeightEmu;
         }
 
         // Walk the presentation rel list in order to find slide ids.
