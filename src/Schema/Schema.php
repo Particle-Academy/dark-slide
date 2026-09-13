@@ -200,6 +200,69 @@ final class Schema
     }
 
     /**
+     * The `style` object, with the unit of every field the writer reads.
+     *
+     * It used to be published as a bare `{type: object}`, so a model filling it
+     * in had nothing to go on but the key names, and `fontSize` reads as points.
+     * It is design pixels, halved on the way into the file (trap 5 in AGENTS.md):
+     * an agent in the fancy-labs document lab set a headline at what it called
+     * 232pt, and the deck it wrote carried 116pt. The units in this object are
+     * not all the same either, which no key name can tell you.
+     *
+     * Descriptions and permissive types only. The validator does not read this
+     * export, so nothing a deck could do before is refused now.
+     * `SchemaDescribesStyleUnitsTest` checks every worked example below against
+     * what the writer actually produces, and fails if the writer starts reading
+     * a style key this does not describe.
+     *
+     * @return array<string, mixed>
+     */
+    private static function styleJsonSchema(): array
+    {
+        return [
+            'type' => 'object',
+            'description' => 'How a text element, or the text inside a shape, looks. The units are NOT uniform: fontSize is in design pixels and is halved into points, while letterSpacing, spaceBefore, spaceAfter, padding, radius and the border and accent-bar widths are already in points, and lineHeight is a multiple.',
+            'properties' => [
+                'fontSize' => ['type' => 'number', 'description' => 'Type size in DESIGN PIXELS on the 1920px-wide fancy-slides canvas, NOT points. The PPTX file carries half, with an 8pt minimum: 96 is written as 48pt, 24 as 12pt, and anything under 16 as 8pt. Default 24.'],
+                'fontFamily' => ['type' => 'string', 'description' => 'Typeface name. No font is embedded in the file, so where this face is not installed the viewer substitutes another, which also changes how wide the text is.'],
+                'weight' => ['type' => ['string', 'number'], 'description' => 'Bold when "bold" or "semibold", or a number of 600 or more. PPTX has only bold and regular, so any other weight renders regular.'],
+                'italic' => ['type' => 'boolean'],
+                'underline' => ['type' => 'boolean'],
+                'color' => ['type' => 'string', 'description' => 'Text colour as a hex string. Default "#0F172A".'],
+                'align' => ['type' => 'string', 'description' => 'Horizontal alignment: "left" (default), "center", "right" or "justify". Anything else renders left.'],
+                'verticalAlign' => ['type' => 'string', 'description' => 'Vertical alignment inside the box: "top" (default), "middle" or "bottom".'],
+                'lineHeight' => ['type' => 'number', 'description' => 'Line spacing as a MULTIPLE of the type size, as in CSS: 1.4 is written as 140% line spacing.'],
+                'letterSpacing' => ['type' => 'number', 'description' => 'Extra space between letters, in POINTS, not halved: 2 is written as 2pt.'],
+                'spaceBefore' => ['type' => 'number', 'description' => 'Space above each paragraph, in POINTS, not halved: 6 is written as 6pt.'],
+                'spaceAfter' => ['type' => 'number', 'description' => 'Space below each paragraph, in POINTS, not halved.'],
+                'caps' => ['type' => 'string', 'description' => '"small" for small capitals, or "all" (also "upper") for all capitals.'],
+                'bullet' => ['type' => ['string', 'boolean'], 'description' => 'Marker for list lines ("- item"): omit for a round bullet, "none" or false for no marker, "number" for 1. 2. 3., or any other string to use it as the marker character.'],
+                'fill' => ['type' => ['string', 'boolean'], 'description' => 'Background colour of the box, as a hex string. "none" or false for no fill.'],
+                'radius' => ['type' => 'number', 'description' => 'Corner radius of the box, in POINTS.'],
+                'border' => [
+                    'type' => 'object',
+                    'description' => 'An outline on all four sides of the box. PPTX cannot outline a single side; use accentBar for that.',
+                    'properties' => [
+                        'width' => ['type' => 'number', 'description' => 'Line width in POINTS. Default 1; 0 draws no line.'],
+                        'color' => ['type' => 'string', 'description' => 'Hex colour. Default "#CBD5E1".'],
+                        'style' => ['type' => 'string', 'description' => '"solid" (default), or a DrawingML dash name such as "dash" or "sysDot".'],
+                    ],
+                ],
+                'padding' => ['type' => ['number', 'object'], 'description' => 'Inset between the box edge and the text, in POINTS: one number for every side (12 is written as 12pt), or {left, right, top, bottom}. When unset the insets are 7.2 left and right and 3.6 top and bottom, widened to clear an accent bar.'],
+                'accentBar' => [
+                    'type' => 'object',
+                    'description' => 'A coloured bar down one edge of the box, as on a callout. Painted inside the same shape, so it needs no second element.',
+                    'properties' => [
+                        'color' => ['type' => 'string', 'description' => 'Hex colour. Default "#8B5CF6".'],
+                        'width' => ['type' => 'number', 'description' => 'Bar width in POINTS. Default 4.'],
+                        'side' => ['type' => 'string', 'description' => '"left" (default) or "right".'],
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private static function elementJsonSchema(): array
@@ -210,10 +273,10 @@ final class Schema
             'properties' => [
                 'id' => ['type' => 'string'],
                 'type' => ['type' => 'string', 'enum' => self::ELEMENT_TYPES],
-                'x' => ['type' => 'number', 'minimum' => 0, 'maximum' => 1],
-                'y' => ['type' => 'number', 'minimum' => 0, 'maximum' => 1],
-                'w' => ['type' => 'number', 'minimum' => 0, 'maximum' => 1],
-                'h' => ['type' => 'number', 'minimum' => 0, 'maximum' => 1],
+                'x' => ['type' => 'number', 'minimum' => 0, 'maximum' => 1, 'description' => 'Left edge as a FRACTION of the slide width: 0 is the left edge, 0.5 the centre, 1 the right edge. Not pixels.'],
+                'y' => ['type' => 'number', 'minimum' => 0, 'maximum' => 1, 'description' => 'Top edge as a FRACTION of the slide height: 0 is the top, 1 the bottom. Not pixels.'],
+                'w' => ['type' => 'number', 'minimum' => 0, 'maximum' => 1, 'description' => 'Width as a FRACTION of the slide width. 1 spans the whole slide.'],
+                'h' => ['type' => 'number', 'minimum' => 0, 'maximum' => 1, 'description' => 'Height as a FRACTION of the slide height. 1 spans the whole slide.'],
                 'rotation' => ['type' => 'number'],
                 'z' => ['type' => 'integer'],
                 'locked' => ['type' => 'boolean'],
@@ -224,7 +287,7 @@ final class Schema
                 // Type-specific fields — kept loose since this is a union.
                 'content' => ['type' => 'string'],
                 'format' => ['type' => 'string', 'enum' => self::TEXT_FORMATS],
-                'style' => ['type' => 'object'],
+                'style' => self::styleJsonSchema(),
                 'src' => ['type' => 'string'],
                 'alt' => ['type' => 'string'],
                 'fit' => ['type' => 'string', 'enum' => ['contain', 'cover', 'fill', 'scale-down']],

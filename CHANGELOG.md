@@ -2,6 +2,33 @@
 
 ## [Unreleased]
 
+## v0.9.2 — 2026-09-13
+
+### Fixed
+
+- **The published schema says what unit every `style` field is in.**
+  `Agent::jsonSchema()` exported `style` as a bare `{type: object}`, so a model
+  filling it in had only the key names, and `fontSize` reads as points. It is
+  design pixels on the 1920px fancy-slides canvas, halved into points with an
+  8pt minimum. In the fancy-labs document lab an agent described its headline as
+  232pt, and the file it wrote carried 116pt.
+
+  The style object also mixes units, which no key name conveys: `letterSpacing`,
+  `spaceBefore`, `spaceAfter`, `padding`, `radius` and the border and accent-bar
+  widths are already points, and `lineHeight` is a multiple. Every field the
+  writer reads now carries a description with a worked example, and `x`, `y`,
+  `w` and `h` say they are fractions of the slide.
+
+  **Upgrade and do nothing.** Descriptions and permissive types only: the
+  validator never reads this export and the writer's bytes are unchanged, so no
+  deck validates or renders differently. If you register the schema as an LLM
+  tool, the model now sees the units.
+
+  `SchemaDescribesStyleUnitsTest` scans the writer for every `$style['…']` key
+  and fails if one is undescribed, and checks each worked example against the
+  XML the writer emits. The Node and Python ports publish the identical schema
+  and diff theirs against this one.
+
 ## v0.9.1 — 2026-09-10
 
 ### Fixed
