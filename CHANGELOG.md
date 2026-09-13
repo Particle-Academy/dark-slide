@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## v0.10.0 — 2026-09-13
+
 **BREAKING, for how big things are, not for any API.** Pre-1.0, so this lands in
 a minor.
 
