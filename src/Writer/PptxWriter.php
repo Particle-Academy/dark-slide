@@ -1831,6 +1831,17 @@ final class PptxWriter
                 (string) ($element['format'] ?? 'plain'),
             );
 
+        // A rounded rectangle takes its `radius` (design pixels, fancy-slides'
+        // default 8) instead of PowerPoint's default corner, which it ignored.
+        $geometry = $prst === 'roundRect'
+            ? BoxDecoration::roundRectGeometry(
+                (float) ($element['radius'] ?? 8),
+                Emu::fromFracX((float) ($element['w'] ?? 0)),
+                Emu::fromFracY((float) ($element['h'] ?? 0), $this->slideHeightEmu),
+                $this->deckTheme,
+            )
+            : '<a:prstGeom prst="' . $prst . '"><a:avLst/></a:prstGeom>';
+
         return '<p:sp>'
             . '<p:nvSpPr>'
             . '<p:cNvPr id="' . $shapeId . '" name="' . Xml::attr((string) $id) . '"/>'
@@ -1839,7 +1850,7 @@ final class PptxWriter
             . '</p:nvSpPr>'
             . '<p:spPr>'
             . $xfrm
-            . '<a:prstGeom prst="' . $prst . '"><a:avLst/></a:prstGeom>'
+            . $geometry
             . $fillXml
             . $lnXml
             . '</p:spPr>'

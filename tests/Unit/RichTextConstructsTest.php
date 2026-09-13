@@ -110,7 +110,12 @@ it('rounds the corners when a radius is given', function () {
     $xml = rtcSlide(rtcText(['style' => ['fill' => '#E8F2F3', 'radius' => 8]]));
 
     expect($xml)->toContain('<a:prstGeom prst="roundRect">');
-    expect($xml)->toContain('<a:gd name="adj"');
+
+    // DrawingML's corner radius is min(w, h) * adj / 100000. The box is 0.88 x
+    // 0.18 of a 16:9 slide, so its shorter side is 925830 EMU; 8 design px is
+    // 3pt = 38100 EMU; 38100 / 925830 * 100000 = 4115. The old formula divided
+    // by HALF the shorter side and drew every corner twice as round.
+    expect($xml)->toContain('<a:gd name="adj" fmla="val 4115"/>');
 });
 
 it('turns padding into text-body insets', function () {

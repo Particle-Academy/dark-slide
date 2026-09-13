@@ -57,9 +57,28 @@ final class BoxDecoration
             return '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>';
         }
 
-        // `adj` is a proportion of HALF the shorter side, in 1/1000 of a percent.
+        return self::roundRectGeometry((float) $radius, $widthEmu, $heightEmu, $theme);
+    }
+
+    /**
+     * A `roundRect` whose corners have the given radius, in design pixels.
+     *
+     * DrawingML defines the corner radius as `min(w, h) * adj / 100000`, with
+     * `adj` pinned to 0..50000 (so 50000 is a pill). Read off LibreOffice's own
+     * preset table, `share/filter/oox-drawingml-cs-presets`, whose roundRect
+     * equations are `pin(0, adj, 50000)`, `min(logwidth, logheight)` and
+     * `?1 * ?0 / 100000`. This used to divide by HALF the shorter side, which
+     * drew every corner at twice the radius asked for.
+     *
+     * Shared by decorated text boxes and `rounded-rect` shapes, so the two cannot
+     * disagree about what a radius means.
+     *
+     * @param  array<string, mixed>  $theme
+     */
+    public static function roundRectGeometry(float $radiusPx, int $widthEmu, int $heightEmu, array $theme = []): string
+    {
         $shorter = max(1, min($widthEmu, $heightEmu));
-        $adj = (int) round(Emu::fromPt(DesignUnits::toPt((float) $radius, $theme)) / ($shorter / 2) * 100000);
+        $adj = (int) round(Emu::fromPt(DesignUnits::toPt($radiusPx, $theme)) / $shorter * 100000);
         $adj = max(0, min(50000, $adj));
 
         return '<a:prstGeom prst="roundRect"><a:avLst><a:gd name="adj" fmla="val ' . $adj . '"/></a:avLst></a:prstGeom>';

@@ -71,6 +71,22 @@ it('scales a shape outline with the canvas', function () {
     expect(dcParts(dcDeck(['slideWidth' => 1440], $shape))['slide'])->toContain('<a:ln w="50800">');   // 4pt
 });
 
+it('rounds a rounded-rect shape by its radius in design pixels', function (?int $radius, int $adj) {
+    // A 0.3 x 0.2 box on a 16:9 slide: 2743200 x 1028700 EMU, shorter side 1028700.
+    // The corner radius is min(w, h) * adj / 100000, so adj = radiusEmu / 1028700 * 100000.
+    $shape = ['type' => 'shape', 'shape' => 'rounded-rect', 'w' => 0.3, 'h' => 0.2];
+    if ($radius !== null) {
+        $shape['radius'] = $radius;
+    }
+
+    expect(dcParts(dcDeck([], $shape))['slide'])->toContain('<a:prstGeom prst="roundRect"><a:avLst><a:gd name="adj" fmla="val '.$adj.'"/></a:avLst></a:prstGeom>');
+})->with([
+    // It used to ignore `radius` and write an empty avLst, PowerPoint's default corner.
+    'fancy-slides default 8px = 3pt' => [null, 3704],
+    '64px = 24pt' => [64, 29630],
+    'larger than the box is a pill, not an overflow' => [4000, 50000],
+]);
+
 it('shapes the slide by theme.aspectRatio instead of always writing 16:9', function (float $ratio, string $sldSz, int $yEmu) {
     $parts = dcParts(dcDeck(['aspectRatio' => $ratio], []));
 

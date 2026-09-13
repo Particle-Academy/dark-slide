@@ -44,6 +44,16 @@ a minor.
   10in wide; 16:9, 16:10 and 4:3 get PowerPoint's named `<p:sldSz type>`, any
   other ratio a custom size.
 
+- **Rounded corners are the radius you ask for, not twice it.** DrawingML's
+  `roundRect` corner radius is `min(w, h) * adj / 100000`, read off LibreOffice's
+  own preset table (`share/filter/oox-drawingml-cs-presets`). A decorated text
+  box's `adj` was computed against HALF the shorter side, so every
+  `style.radius` drew corners twice as round as requested.
+
+- **A `rounded-rect` shape takes its `radius`** (design pixels, default 8, as in
+  fancy-slides). It was ignored, and every rounded rectangle got PowerPoint's
+  default corner whatever the deck said.
+
 - **The reader reads geometry against the file's own slide size** (`<p:sldSz>`)
   instead of assuming 16:9, and returns `theme.aspectRatio` for any other shape.
   A 4:3 deck's `y` of 0.5 used to read back as 0.667.
