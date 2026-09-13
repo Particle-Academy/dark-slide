@@ -84,6 +84,36 @@ it('shapes the slide by theme.aspectRatio instead of always writing 16:9', funct
     'custom 2:1' => [2.0, '<p:sldSz cx="9144000" cy="4572000"/>', 2286000],
 ]);
 
+it('reads a non-16:9 deck back with its own geometry and aspect ratio', function () {
+    $path = sys_get_temp_dir().'/dc-read-'.bin2hex(random_bytes(4)).'.pptx';
+    Agent::write(dcDeck(['aspectRatio' => 4 / 3], []), $path);
+
+    try {
+        $deck = Agent::read($path);
+    } finally {
+        @unlink($path);
+    }
+
+    // The reader used to convert against a 16:9 height, reading y 0.5 of a 4:3
+    // slide back as 0.667.
+    expect($deck['slides'][0]['elements'][0]['y'])->toBe(0.5);
+    expect($deck['slides'][0]['elements'][0]['h'])->toBe(0.25);
+    expect($deck['theme']['aspectRatio'])->toBe(4 / 3);
+});
+
+it('reads a 16:9 deck back without inventing an aspect ratio', function () {
+    $path = sys_get_temp_dir().'/dc-read-'.bin2hex(random_bytes(4)).'.pptx';
+    Agent::write(dcDeck([], []), $path);
+
+    try {
+        $deck = Agent::read($path);
+    } finally {
+        @unlink($path);
+    }
+
+    expect($deck['theme'])->not->toHaveKey('aspectRatio');
+});
+
 it('writes a deck with no aspectRatio exactly as 16:9', function () {
     expect(dcParts(dcDeck([], []))['presentation'])->toContain('<p:sldSz cx="9144000" cy="5143500" type="screen16x9"/>');
 });

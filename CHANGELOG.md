@@ -44,6 +44,10 @@ a minor.
   10in wide; 16:9, 16:10 and 4:3 get PowerPoint's named `<p:sldSz type>`, any
   other ratio a custom size.
 
+- **The reader reads geometry against the file's own slide size** (`<p:sldSz>`)
+  instead of assuming 16:9, and returns `theme.aspectRatio` for any other shape.
+  A 4:3 deck's `y` of 0.5 used to read back as 0.667.
+
 - **`Layout::fit` no longer needs `ext-mbstring`.** It called `mb_strlen`, which
   this package never declared.
 

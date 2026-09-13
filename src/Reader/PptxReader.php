@@ -46,6 +46,15 @@ final class PptxReader
     private ?ZipArchive $currentZip = null;
 
     /**
+     * The slide size from `<p:sldSz>`, so geometry comes back as fractions of
+     * THIS slide. Every conversion used to assume 16:9 at 10in, which read a
+     * 4:3 deck's positions back wrong.
+     */
+    private int $slideWidthEmu = Emu::DEFAULT_SLIDE_WIDTH;
+
+    private int $slideHeightEmu = Emu::DEFAULT_SLIDE_HEIGHT;
+
+    /**
      * @return array<string, mixed>
      */
     public function read(string $path): array
@@ -102,6 +111,12 @@ final class PptxReader
         ];
 
         $this->monoTypeface = $this->readMonoTypeface($zip);
+        $this->readSlideSize($zip);
+        // 16:9 at 10in is the default and says nothing; any other shape is part
+        // of the deck and comes back as its aspect ratio.
+        if ($this->slideWidthEmu !== Emu::DEFAULT_SLIDE_WIDTH || $this->slideHeightEmu !== Emu::DEFAULT_SLIDE_HEIGHT) {
+            $deck['theme']['aspectRatio'] = $this->slideWidthEmu / $this->slideHeightEmu;
+        }
 
         // Walk the presentation rel list in order to find slide ids.
         $presentationRels = $zip->getFromName('ppt/_rels/presentation.xml.rels');
@@ -228,6 +243,33 @@ final class PptxReader
         return preg_match('/<ds:monoFont[^>]*typeface="([^"]*)"/', $xml, $m) === 1
             ? html_entity_decode($m[1], ENT_QUOTES | ENT_XML1, 'UTF-8')
             : '';
+    }
+
+    private function readSlideSize(ZipArchive $zip): void
+    {
+        $this->slideWidthEmu = Emu::DEFAULT_SLIDE_WIDTH;
+        $this->slideHeightEmu = Emu::DEFAULT_SLIDE_HEIGHT;
+
+        $xml = $zip->getFromName('ppt/presentation.xml');
+        if ($xml === false || ! preg_match('/<p:sldSz\b[^>]*>/', $xml, $tag)) {
+            return;
+        }
+        if (preg_match('/\bcx="(\d+)"/', $tag[0], $cx) && (int) $cx[1] > 0) {
+            $this->slideWidthEmu = (int) $cx[1];
+        }
+        if (preg_match('/\bcy="(\d+)"/', $tag[0], $cy) && (int) $cy[1] > 0) {
+            $this->slideHeightEmu = (int) $cy[1];
+        }
+    }
+
+    private function fracX(int $emu): float
+    {
+        return Emu::toFracX($emu, $this->slideWidthEmu);
+    }
+
+    private function fracY(int $emu): float
+    {
+        return Emu::toFracY($emu, $this->slideHeightEmu);
     }
 
     /**
@@ -529,10 +571,10 @@ final class PptxReader
 
         $base = [
             'id' => (string) ($sp->xpath('.//p:cNvPr')[0]['name'] ?? 'imported-' . random_int(1000, 9999)),
-            'x' => Emu::toFracX($x),
-            'y' => Emu::toFracY($y),
-            'w' => Emu::toFracX($cx),
-            'h' => Emu::toFracY($cy),
+            'x' => $this->fracX($x),
+            'y' => $this->fracY($y),
+            'w' => $this->fracX($cx),
+            'h' => $this->fracY($cy),
         ];
 
         // Text body present?
@@ -614,10 +656,10 @@ final class PptxReader
         return [
             'id' => (string) ($pic->xpath('.//p:cNvPr')[0]['name'] ?? 'imported-' . random_int(1000, 9999)),
             'type' => 'image',
-            'x' => Emu::toFracX((int) $offset['x']),
-            'y' => Emu::toFracY((int) $offset['y']),
-            'w' => Emu::toFracX((int) $extent['cx']),
-            'h' => Emu::toFracY((int) $extent['cy']),
+            'x' => $this->fracX((int) $offset['x']),
+            'y' => $this->fracY((int) $offset['y']),
+            'w' => $this->fracX((int) $extent['cx']),
+            'h' => $this->fracY((int) $extent['cy']),
             'src' => $src,
             'fit' => 'contain',
         ];
@@ -702,10 +744,10 @@ final class PptxReader
         return [
             'id' => (string) ($gf->xpath('.//p:cNvPr')[0]['name'] ?? 'imported-table-' . random_int(1000, 9999)),
             'type' => 'table',
-            'x' => Emu::toFracX((int) $offset['x']),
-            'y' => Emu::toFracY((int) $offset['y']),
-            'w' => Emu::toFracX((int) $extent['cx']),
-            'h' => Emu::toFracY((int) $extent['cy']),
+            'x' => $this->fracX((int) $offset['x']),
+            'y' => $this->fracY((int) $offset['y']),
+            'w' => $this->fracX((int) $extent['cx']),
+            'h' => $this->fracY((int) $extent['cy']),
             'columns' => $columns,
             'rows' => $bodyRows,
         ];
