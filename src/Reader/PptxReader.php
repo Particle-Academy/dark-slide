@@ -123,6 +123,12 @@ final class PptxReader
             $deck['slides'][] = $slide;
         }
 
+        // Only when the file embeds any, so every other read is unchanged.
+        $embeddedFonts = $this->readEmbeddedFonts($zip);
+        if ($embeddedFonts !== []) {
+            $deck['metadata'] = ['embeddedFonts' => $embeddedFonts];
+        }
+
         return $deck;
     }
 
@@ -222,6 +228,38 @@ final class PptxReader
         return preg_match('/<ds:monoFont[^>]*typeface="([^"]*)"/', $xml, $m) === 1
             ? html_entity_decode($m[1], ENT_QUOTES | ENT_XML1, 'UTF-8')
             : '';
+    }
+
+    /**
+     * The typefaces the file embeds and which of the four variants each carries.
+     *
+     * Names and variants only, never the font bytes: a reader's output is a deck,
+     * and a deck is agent-facing JSON that has no business holding licensed
+     * binaries.
+     *
+     * @return list<array{typeface: string, variants: list<string>}>
+     */
+    private function readEmbeddedFonts(ZipArchive $zip): array
+    {
+        $xml = $zip->getFromName('ppt/presentation.xml');
+        if ($xml === false || ! preg_match('/<p:embeddedFontLst>(.*?)<\/p:embeddedFontLst>/s', $xml, $list)) {
+            return [];
+        }
+
+        $fonts = [];
+        preg_match_all('/<p:embeddedFont>(.*?)<\/p:embeddedFont>/s', $list[1], $entries);
+        foreach ($entries[1] as $entry) {
+            if (! preg_match('/<p:font\b[^>]*\btypeface="([^"]*)"/', $entry, $face)) {
+                continue;
+            }
+            preg_match_all('/<p:(regular|bold|italic|boldItalic)\b/', $entry, $variants);
+            $fonts[] = [
+                'typeface' => html_entity_decode($face[1], ENT_QUOTES | ENT_XML1, 'UTF-8'),
+                'variants' => $variants[1],
+            ];
+        }
+
+        return $fonts;
     }
 
     private function readCoreTitle(ZipArchive $zip): ?string

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace DarkSlide\Writer;
 
+use DarkSlide\Fonts\EmbeddedFonts;
 use DarkSlide\Helpers\ChartTranslator;
 use DarkSlide\Helpers\Color;
 use DarkSlide\Helpers\Emu;
@@ -144,6 +145,7 @@ final class PptxWriter
         private bool $allowHttpImages = false,
         private ?\DarkSlide\ImageResolver $images = null,
         private ?\DarkSlide\ChartRenderer $charts = null,
+        private ?EmbeddedFonts $fonts = null,
     ) {
     }
 
@@ -233,13 +235,15 @@ final class PptxWriter
             }
 
             // 2. Top-level + ppt-level scaffolding.
-            $zip->addFromString('[Content_Types].xml', $this->buildContentTypes($slideCount, array_keys($notesSlidesXml), array_keys($this->chartFiles)));
+            $fonts = $this->fonts ?? EmbeddedFonts::none();
+
+            $zip->addFromString('[Content_Types].xml', $this->buildContentTypes($slideCount, array_keys($notesSlidesXml), array_keys($this->chartFiles), ! $fonts->isEmpty()));
             $zip->addFromString('_rels/.rels', $this->buildTopRels());
             $zip->addFromString('docProps/core.xml', $this->buildCoreProps($deck));
             $zip->addFromString('docProps/app.xml', $this->buildAppProps($slideCount));
 
-            $zip->addFromString('ppt/presentation.xml', $this->buildPresentation($slideCount));
-            $zip->addFromString('ppt/_rels/presentation.xml.rels', $this->buildPresentationRels($slideCount));
+            $zip->addFromString('ppt/presentation.xml', $this->buildPresentation($slideCount, $fonts));
+            $zip->addFromString('ppt/_rels/presentation.xml.rels', $this->buildPresentationRels($slideCount, $fonts));
 
             $zip->addFromString('ppt/theme/theme1.xml', $this->buildTheme($deck));
             $zip->addFromString('ppt/slideMasters/slideMaster1.xml', $this->buildSlideMaster());
@@ -275,6 +279,11 @@ final class PptxWriter
                 $zip->addFromString($archivePath, $bytes);
             }
 
+            // 8. Embedded fonts (only when the host supplied them).
+            foreach ($fonts->parts as $font) {
+                $zip->addFromString($font['part'], $font['bytes']);
+            }
+
             $zip->close();
 
             $contents = file_get_contents($tmp);
@@ -295,7 +304,7 @@ final class PptxWriter
      * @param  list<int>  $notesSlideIds
      * @param  list<string>  $chartParts  archive paths of emitted chart parts
      */
-    private function buildContentTypes(int $slideCount, array $notesSlideIds, array $chartParts): string
+    private function buildContentTypes(int $slideCount, array $notesSlideIds, array $chartParts, bool $hasFonts = false): string
     {
         $slideOverrides = '';
         for ($i = 1; $i <= $slideCount; $i++) {
@@ -325,7 +334,9 @@ final class PptxWriter
             . '<Default Extension="jpeg" ContentType="image/jpeg"/>'
             . '<Default Extension="gif" ContentType="image/gif"/>'
             . '<Default Extension="svg" ContentType="image/svg+xml"/>'
-            . '<Default Extension="webp" ContentType="image/webp"/>';
+            . '<Default Extension="webp" ContentType="image/webp"/>'
+            // Only when a font is embedded, so every other deck keeps its bytes.
+            . ($hasFonts ? '<Default Extension="fntdata" ContentType="application/x-fontdata"/>' : '');
 
         return Xml::declaration()
             . '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
@@ -381,7 +392,7 @@ final class PptxWriter
 
     // ─── presentation.xml ──────────────────────────────────────────────────
 
-    private function buildPresentation(int $slideCount): string
+    private function buildPresentation(int $slideCount, ?EmbeddedFonts $fonts = null): string
     {
         $sldIdLst = '';
         for ($i = 1; $i <= $slideCount; $i++) {
@@ -390,26 +401,72 @@ final class PptxWriter
             $sldIdLst .= '<p:sldId id="' . $id . '" r:id="rId' . ($i + 1) . '"/>';
         }
         $slideMasterRid = 'rId' . ($slideCount + 2);
+        $fonts ??= EmbeddedFonts::none();
+
+        // With embedded fonts the file says so, and drops `saveSubsetFonts`: that
+        // flag declares the embedded fonts to be character subsets, and these are
+        // whole fonts. LibreOffice's own export writes the same pair.
+        $fontFlag = $fonts->isEmpty() ? 'saveSubsetFonts="1"' : 'embedTrueTypeFonts="1"';
 
         return Xml::declaration()
             . '<p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
             . 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
             . 'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
-            . 'saveSubsetFonts="1">'
+            . $fontFlag . '>'
             . '<p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="' . $slideMasterRid . '"/></p:sldMasterIdLst>'
             . '<p:sldIdLst>' . $sldIdLst . '</p:sldIdLst>'
             . '<p:sldSz cx="' . Emu::DEFAULT_SLIDE_WIDTH . '" cy="' . Emu::DEFAULT_SLIDE_HEIGHT . '" type="screen16x9"/>'
             . '<p:notesSz cx="' . Emu::DEFAULT_SLIDE_HEIGHT . '" cy="' . Emu::DEFAULT_SLIDE_WIDTH . '"/>'
+            . $this->buildEmbeddedFontList($slideCount, $fonts)
             . '</p:presentation>';
     }
 
-    private function buildPresentationRels(int $slideCount): string
+    /**
+     * `<p:embeddedFontLst>`: one entry per typeface, its variants in the schema's
+     * fixed order (regular, bold, italic, boldItalic).
+     *
+     * It follows `<p:notesSz>` because `CT_Presentation` is a sequence, and
+     * LibreOffice's export places it there. Relationship ids continue after the
+     * slide master's, in the same order {@see buildPresentationRels()} emits them.
+     */
+    private function buildEmbeddedFontList(int $slideCount, EmbeddedFonts $fonts): string
+    {
+        if ($fonts->isEmpty()) {
+            return '';
+        }
+
+        $rid = $slideCount + 3;
+        $entries = '';
+        foreach ($fonts->byTypeface() as $typeface => $variants) {
+            $entries .= '<p:embeddedFont><p:font typeface="' . Xml::attr($typeface) . '"/>';
+            foreach (EmbeddedFonts::VARIANTS as $variant) {
+                if (isset($variants[$variant])) {
+                    $entries .= '<p:' . $variant . ' r:id="rId' . $rid++ . '"/>';
+                }
+            }
+            $entries .= '</p:embeddedFont>';
+        }
+
+        return '<p:embeddedFontLst>' . $entries . '</p:embeddedFontLst>';
+    }
+
+    private function buildPresentationRels(int $slideCount, ?EmbeddedFonts $fonts = null): string
     {
         $rels = '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/>';
         for ($i = 1; $i <= $slideCount; $i++) {
             $rels .= '<Relationship Id="rId' . ($i + 1) . '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide' . $i . '.xml"/>';
         }
         $rels .= '<Relationship Id="rId' . ($slideCount + 2) . '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="slideMasters/slideMaster1.xml"/>';
+
+        // Font relationships in the same typeface-then-variant order as the list.
+        $rid = $slideCount + 3;
+        foreach (($fonts ?? EmbeddedFonts::none())->byTypeface() as $variants) {
+            foreach (EmbeddedFonts::VARIANTS as $variant) {
+                if (isset($variants[$variant])) {
+                    $rels .= '<Relationship Id="rId' . $rid++ . '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/font" Target="' . substr($variants[$variant], strlen('ppt/')) . '"/>';
+                }
+            }
+        }
 
         return Xml::declaration()
             . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'

@@ -2,6 +2,40 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Embed the host's fonts in the file**, so brand typography survives machines
+  that do not have it installed. Pass `fonts` in the write options (`write`,
+  `toBytes`, `toStream`):
+
+  ```php
+  Agent::write($deck, $path, ['fonts' => [
+      'Bebas Neue' => ['regular' => '/fonts/BebasNeue-Regular.ttf'],
+      'Inter' => ['regular' => $bytes, 'bold' => '/fonts/Inter-Bold.ttf'],
+  ]]);
+  ```
+
+  Each variant (`regular`, `bold`, `italic`, `boldItalic`) is a path or the font
+  bytes. The deck itself never carries a font, so an agent can name a typeface
+  but never make the writer read a file.
+
+  Fonts are written as uncompressed Embedded OpenType in `ppt/fonts/fontN.fntdata`,
+  with `<p:embeddedFontLst>` and `embedTrueTypeFonts="1"`. **Verified by rendering
+  in LibreOffice 26**: the embedded face renders, and the same deck without it
+  falls back. **Not verified in PowerPoint or Google Slides**, which are not
+  available here.
+
+  Refused, all at once and before anything is written, with
+  `FontEmbeddingException`: fonts whose licence (`fsType`) forbids embedding or
+  allows bitmaps only, CFF-outline `.otf` and `.ttc` collections, and a file whose
+  family name is not the typeface it was supplied for (the deck would never use
+  it).
+
+  `Agent::read()` reports embedded typefaces and variants in
+  `metadata.embeddedFonts`, never the bytes.
+
+  **Nothing changes for a deck written without `fonts`**: same parts, same bytes.
+
 ## v0.9.2 — 2026-09-13
 
 ### Fixed

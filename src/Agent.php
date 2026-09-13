@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace DarkSlide;
 
 use DarkSlide\Exceptions\SchemaException;
+use DarkSlide\Fonts\EmbeddedFonts;
+use DarkSlide\Fonts\FontEmbeddingException;
 use DarkSlide\Reader\PptxReader;
 use DarkSlide\Schema\Repairer;
 use DarkSlide\Schema\Schema;
@@ -157,18 +159,25 @@ final class Agent
     /**
      * Construct a writer from the shared options array.
      *
-     * @param  array{tempDir?: ?string, allowHttpImages?: bool, images?: ImageResolver}  $options
+     * `fonts` embeds typefaces in the file: `typeface => [variant => path or
+     * bytes]`, variants `regular`, `bold`, `italic`, `boldItalic`. See
+     * {@see EmbeddedFonts}. A font that cannot be embedded throws
+     * {@see FontEmbeddingException} before anything is written.
+     *
+     * @param  array{tempDir?: ?string, allowHttpImages?: bool, images?: ImageResolver, charts?: ChartRenderer, fonts?: array<string, array<string, string>>}  $options
      */
     private static function makeWriter(array $options): PptxWriter
     {
         $images = $options['images'] ?? null;
         $charts = $options['charts'] ?? null;
+        $fonts = $options['fonts'] ?? [];
 
         return new PptxWriter(
             $options['tempDir'] ?? null,
             (bool) ($options['allowHttpImages'] ?? false),
             $images instanceof ImageResolver ? $images : null,
             $charts instanceof ChartRenderer ? $charts : null,
+            is_array($fonts) && $fonts !== [] ? EmbeddedFonts::fromOptions($fonts) : null,
         );
     }
 

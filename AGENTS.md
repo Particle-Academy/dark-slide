@@ -159,6 +159,30 @@ Worth knowing before designing around it:
   every renderer tested, which is close enough, but there is no declarative
   "fit the content".
 
+## Embedded fonts (`Fonts\`)
+
+Opt-in through the write options (`fonts: typeface => [variant => path|bytes]`),
+never through the deck: an agent names a face, the host supplies the licensed file.
+
+- **`.fntdata` is an EOT, not a `.ttf`.** Verified by rendering in LibreOffice 26:
+  an uncompressed EOT renders the embedded face; the same font stored raw, or
+  GUID-obfuscated as Word does, falls back. `FontEmbeddingTest`'s render case
+  (`DARK_SLIDE_RENDER=1`) goes red if the wrapper is dropped.
+- **Uncompressed.** LibreOffice's libeot here cannot read MicroType Express.
+- **TrueType outlines only** (`OTTO` and `ttcf` are refused). LibreOffice renders a
+  CFF font too, but PowerPoint's acceptance is unverified.
+- **The licence is enforced here or nowhere.** LibreOffice renders a font whose
+  `fsType` forbids embedding, so `EmbeddedFonts` refuses Restricted License
+  (without a less restrictive bit) and bitmap-only.
+- **Refusals throw, together, before anything is written.** A skipped font is a
+  deck in a substitute face with nothing saying so.
+- **No font supplied means no byte changes**, which keeps both parity suites green.
+  `embedTrueTypeFonts="1"` REPLACES `saveSubsetFonts="1"` only when a font is
+  embedded: that flag declares subsets, and these are whole fonts.
+- **PowerPoint and Google Slides are not verified.** Neither is installed here.
+- Tests use `tests/Support/GeneratedFont`, a TrueType font built in memory, so no
+  third-party font file is ever committed.
+
 Also worth recording: **LibreOffice Impress does not honour `hMerge` on import.**
 It draws the split rule and both cell texts. The construction is spec-correct and
 is what PowerPoint expects, but it cannot be verified by rendering in Impress, so
