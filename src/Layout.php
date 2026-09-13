@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace DarkSlide;
 
+use DarkSlide\Helpers\DesignUnits;
+
 /**
  * Opt-in slide tidy-up — snap elements to a grid, nudge overlaps apart, and
  * shrink over-long text to fit its box. Never run automatically; a consumer (or
@@ -18,7 +20,13 @@ final class Layout
 {
     /**
      * @param  array<string,mixed>  $slide
-     * @param  array{grid?:int,reflowOverlap?:bool,fitText?:bool,safeMargin?:float,slideWidth?:float}  $options
+     * `slideWidth` and `aspectRatio` describe the design canvas and default to
+     * the deck theme's own defaults (1920, 16/9). The text estimate measures a
+     * box in design pixels against a font size in design pixels, so both have
+     * to be on the canvas the writer and fancy-slides use; this defaulted to
+     * 1280 and a fixed 16:9, a third canvas that neither of them draws on.
+     *
+     * @param  array{grid?:int,reflowOverlap?:bool,fitText?:bool,safeMargin?:float,slideWidth?:float,aspectRatio?:float}  $options
      * @return array<string,mixed>
      */
     public static function fit(array $slide, array $options = []): array
@@ -27,7 +35,10 @@ final class Layout
         $reflow = (bool) ($options['reflowOverlap'] ?? true);
         $fitText = (bool) ($options['fitText'] ?? true);
         $margin = (float) ($options['safeMargin'] ?? 0.02);
-        $slideWidth = (float) ($options['slideWidth'] ?? 1280.0);
+        $slideWidth = DesignUnits::designWidth($options);
+        $ratio = isset($options['aspectRatio']) && is_numeric($options['aspectRatio']) && (float) $options['aspectRatio'] > 0
+            ? (float) $options['aspectRatio']
+            : 16 / 9;
 
         $elements = $slide['elements'] ?? [];
         if (! is_array($elements) || $elements === []) {
@@ -52,7 +63,7 @@ final class Layout
         }
 
         if ($fitText) {
-            $out = array_map(static fn (array $e): array => self::fitTextElement($e, $slideWidth), $out);
+            $out = array_map(static fn (array $e): array => self::fitTextElement($e, $slideWidth, $slideWidth / $ratio), $out);
         }
 
         $slide['elements'] = array_values($out);
@@ -157,24 +168,27 @@ final class Layout
      * @param  array<string,mixed>  $el
      * @return array<string,mixed>
      */
-    private static function fitTextElement(array $el, float $slideWidth): array
+    private static function fitTextElement(array $el, float $slideWidth, float $slideHeight): array
     {
         if (($el['type'] ?? null) !== 'text' || ! isset($el['content']) || ! is_string($el['content'])) {
             return $el;
         }
 
         $style = is_array($el['style'] ?? null) ? $el['style'] : [];
-        $fontSize = (float) ($style['fontSize'] ?? 24.0);
+        // The writer's default, which is fancy-slides' default.
+        $fontSize = (float) ($style['fontSize'] ?? 28.0);
         if ($fontSize <= 1) {
             return $el;
         }
 
         $boxWpx = (float) $el['w'] * $slideWidth;
-        $boxHpx = (float) $el['h'] * ($slideWidth * 9 / 16);
+        $boxHpx = (float) $el['h'] * $slideHeight;
         $text = trim($el['content']);
         $longestLine = 0;
         foreach (explode("\n", $text) as $line) {
-            $longestLine = max($longestLine, mb_strlen($line));
+            // Code points, counted with core PCRE: `mb_strlen` quietly made this
+            // package need ext-mbstring, which it does not declare.
+            $longestLine = max($longestLine, (int) preg_match_all('/./us', $line));
         }
         $explicitLines = substr_count($text, "\n") + 1;
 
@@ -192,7 +206,7 @@ final class Layout
             $guard++;
         }
 
-        if ($fontSize !== (float) ($style['fontSize'] ?? 24.0)) {
+        if ($fontSize !== (float) ($style['fontSize'] ?? 28.0)) {
             $style['fontSize'] = $fontSize;
             $el['style'] = $style;
         }

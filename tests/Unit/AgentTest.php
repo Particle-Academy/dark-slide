@@ -342,9 +342,8 @@ it('renders markdown headings at larger sizes with bold runs', function () {
     $deck = dsFixture();
     $deck['slides'][0]['elements'][0]['content'] = "# Big heading\n## Medium\n### Small\nbody copy";
     $deck['slides'][0]['elements'][0]['format'] = 'markdown';
-    // Use a body size big enough that the heading multipliers land above
-    // PPTX's 8pt floor on h3.
-    $deck['slides'][0]['elements'][0]['style'] = ['fontSize' => 40];
+    // 64 design px is 24pt on the default 1920 canvas.
+    $deck['slides'][0]['elements'][0]['style'] = ['fontSize' => 64];
 
     $bytes = Agent::toBytes($deck);
     $tmp = tempnam(sys_get_temp_dir(), 'darkslide-test-');
@@ -360,9 +359,9 @@ it('renders markdown headings at larger sizes with bold runs', function () {
         expect($slideXml)->toContain('<a:t>Small</a:t>');
         expect($slideXml)->not->toContain('<a:t># Big heading</a:t>');
         // The first heading run should be bold + larger than the body run.
-        // Body font is 40 → sz=2000 in PPTX; h1 uses 1.8× → sz=3600.
-        expect($slideXml)->toMatch('/<a:rPr[^>]*sz="3600"[^>]*b="1"[^>]*>.{0,200}?Big heading/s');
-        expect($slideXml)->toMatch('/<a:rPr[^>]*sz="2000"[^>]*>.{0,200}?body copy/s');
+        // Body font is 64px → 24pt → sz=2400; h1 uses 1.8× → 43.2pt → sz=4320.
+        expect($slideXml)->toMatch('/<a:rPr[^>]*sz="4320"[^>]*b="1"[^>]*>.{0,200}?Big heading/s');
+        expect($slideXml)->toMatch('/<a:rPr[^>]*sz="2400"[^>]*>.{0,200}?body copy/s');
         $zip->close();
     } finally {
         @unlink($tmp);

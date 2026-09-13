@@ -62,22 +62,23 @@ it('fills a text box when the style asks for it', function () {
 });
 
 it('outlines a text box when the style asks for a border', function () {
-    $xml = rtcSlide(rtcText(['style' => ['border' => ['width' => 1, 'color' => '#CBD5E1']]]));
+    $xml = rtcSlide(rtcText(['style' => ['border' => ['width' => 8, 'color' => '#CBD5E1']]]));
 
-    expect($xml)->toContain('<a:ln w="12700"><a:solidFill><a:srgbClr val="CBD5E1"/></a:solidFill>');
+    // 8 design px on the 1920 canvas = 3pt = 38100 EMU.
+    expect($xml)->toContain('<a:ln w="38100"><a:solidFill><a:srgbClr val="CBD5E1"/></a:solidFill>');
 });
 
 it('draws a left accent bar as a hard-stop gradient in ONE shape', function () {
     $xml = rtcSlide(rtcText([
         'w' => 0.5,   // 4572000 EMU
-        'style' => ['fill' => '#E8F2F3', 'accentBar' => ['color' => '#0E7C86', 'width' => 4]],
+        'style' => ['fill' => '#E8F2F3', 'accentBar' => ['color' => '#0E7C86', 'width' => 16]],
     ]));
 
-    // 4pt = 50800 EMU of 4572000 = 1.1111% → 1111 in thousandths of a percent.
+    // 16 design px = 6pt = 76200 EMU of 4572000 = 1.6667% → 1667 in thousandths of a percent.
     expect($xml)->toContain('<a:gradFill');
     expect($xml)->toContain('<a:gs pos="0"><a:srgbClr val="0E7C86"/></a:gs>');
-    expect($xml)->toContain('<a:gs pos="1111"><a:srgbClr val="0E7C86"/></a:gs>');
-    expect($xml)->toContain('<a:gs pos="1112"><a:srgbClr val="E8F2F3"/></a:gs>');
+    expect($xml)->toContain('<a:gs pos="1667"><a:srgbClr val="0E7C86"/></a:gs>');
+    expect($xml)->toContain('<a:gs pos="1668"><a:srgbClr val="E8F2F3"/></a:gs>');
     expect($xml)->toContain('<a:gs pos="100000"><a:srgbClr val="E8F2F3"/></a:gs>');
     expect($xml)->toContain('<a:lin ang="0" scaled="0"/>');
 
@@ -88,11 +89,11 @@ it('draws a left accent bar as a hard-stop gradient in ONE shape', function () {
 it('insets the text clear of the accent bar without being told to', function () {
     $xml = rtcSlide(rtcText([
         'w' => 0.5,
-        'style' => ['fill' => '#E8F2F3', 'accentBar' => ['color' => '#0E7C86', 'width' => 4]],
+        'style' => ['fill' => '#E8F2F3', 'accentBar' => ['color' => '#0E7C86', 'width' => 16]],
     ]));
 
-    // 4pt bar + the 8pt default gutter = 12pt = 152400 EMU.
-    expect($xml)->toContain('lIns="152400"');
+    // A 16px (6pt) bar + the 8pt default gutter = 14pt = 177800 EMU.
+    expect($xml)->toContain('lIns="177800"');
 });
 
 it('puts the accent bar on the right when asked', function () {
@@ -113,8 +114,9 @@ it('rounds the corners when a radius is given', function () {
 });
 
 it('turns padding into text-body insets', function () {
-    $xml = rtcSlide(rtcText(['style' => ['padding' => ['left' => 12, 'top' => 6, 'right' => 12, 'bottom' => 6]]]));
+    $xml = rtcSlide(rtcText(['style' => ['padding' => ['left' => 32, 'top' => 16, 'right' => 32, 'bottom' => 16]]]));
 
+    // 32px = 12pt = 152400 EMU; 16px = 6pt = 76200 EMU.
     expect($xml)->toContain('lIns="152400"');
     expect($xml)->toContain('tIns="76200"');
 });
@@ -122,14 +124,16 @@ it('turns padding into text-body insets', function () {
 // ─── Paragraph + run controls ─────────────────────────────────────────────
 
 it('emits letter spacing and small caps on the run', function () {
-    $xml = rtcSlide(rtcText(['style' => ['letterSpacing' => 2.4, 'caps' => 'small']]));
+    $xml = rtcSlide(rtcText(['style' => ['letterSpacing' => 8, 'caps' => 'small']]));
 
-    expect($xml)->toContain('spc="240"');
+    // 8 design px = 3pt = 300 hundredths.
+    expect($xml)->toContain('spc="300"');
     expect($xml)->toContain('cap="small"');
 });
 
 it('emits line spacing as a percentage and paragraph spacing as points', function () {
-    $xml = rtcSlide(rtcText(['style' => ['lineHeight' => 1.4, 'spaceBefore' => 6, 'spaceAfter' => 3]]));
+    // spaceBefore 16px = 6pt, spaceAfter 8px = 3pt; lineHeight is a multiple, unscaled.
+    $xml = rtcSlide(rtcText(['style' => ['lineHeight' => 1.4, 'spaceBefore' => 16, 'spaceAfter' => 8]]));
 
     expect($xml)->toContain('<a:lnSpc><a:spcPct val="140000"/></a:lnSpc>');
     expect($xml)->toContain('<a:spcBef><a:spcPts val="600"/></a:spcBef>');
@@ -215,7 +219,8 @@ it('still strokes a shape that says nothing about its outline', function () {
         'x' => 0.1, 'y' => 0.1, 'w' => 0.3, 'h' => 0.2, 'fill' => '#E8F2F3',
     ]);
 
-    expect($xml)->toContain('<a:ln w="25400">');
+    // The default strokeWidth is fancy-slides' 2 design px = 0.75pt = 9525 EMU.
+    expect($xml)->toContain('<a:ln w="9525">');
 });
 
 // ─── Composites ───────────────────────────────────────────────────────────

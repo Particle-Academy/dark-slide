@@ -7,6 +7,7 @@ namespace DarkSlide\Writer;
 use DarkSlide\Fonts\EmbeddedFonts;
 use DarkSlide\Helpers\ChartTranslator;
 use DarkSlide\Helpers\Color;
+use DarkSlide\Helpers\DesignUnits;
 use DarkSlide\Helpers\Emu;
 use DarkSlide\Helpers\MarkdownInline;
 use DarkSlide\Helpers\SyntaxHighlighter;
@@ -100,8 +101,11 @@ final class PptxWriter
     /** Accent hex (no #) pulled from the deck theme; drives chart series colors. */
     private string $themeAccent = '8B5CF6';
 
-    /** The deck's theme, kept whole so the table resolver can read its colours. */
+    /** The deck's theme, kept whole so the table resolver can read its colours and {@see DesignUnits} its canvas. */
     private array $deckTheme = [];
+
+    /** Slide height in EMU: 10in wide, `theme.aspectRatio` decides the rest. */
+    private int $slideHeightEmu = Emu::DEFAULT_SLIDE_HEIGHT;
 
     /**
      * Monospace typeface for code runs, from `theme.fonts.mono`.
@@ -195,6 +199,7 @@ final class PptxWriter
         $this->pendingSlideRels = [];
         [$this->themeAccent] = Color::parse($deck['theme']['colors']['accent'] ?? '#8B5CF6', '8B5CF6');
         $this->deckTheme = is_array($deck['theme'] ?? null) ? $deck['theme'] : [];
+        $this->slideHeightEmu = DesignUnits::slideHeightEmu($this->deckTheme);
         $mono = $deck['theme']['fonts']['mono'] ?? '';
         $this->themeMono = is_string($mono) && trim($mono) !== '' ? trim($mono) : 'Consolas';
 
@@ -415,10 +420,27 @@ final class PptxWriter
             . $fontFlag . '>'
             . '<p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="' . $slideMasterRid . '"/></p:sldMasterIdLst>'
             . '<p:sldIdLst>' . $sldIdLst . '</p:sldIdLst>'
-            . '<p:sldSz cx="' . Emu::DEFAULT_SLIDE_WIDTH . '" cy="' . Emu::DEFAULT_SLIDE_HEIGHT . '" type="screen16x9"/>'
+            . $this->slideSizeXml()
             . '<p:notesSz cx="' . Emu::DEFAULT_SLIDE_HEIGHT . '" cy="' . Emu::DEFAULT_SLIDE_WIDTH . '"/>'
             . $this->buildEmbeddedFontList($slideCount, $fonts)
             . '</p:presentation>';
+    }
+
+    /**
+     * `<p:sldSz>` for a 10in-wide slide shaped by `theme.aspectRatio`.
+     *
+     * The ratio used to be accepted by the validator and published in the schema
+     * while every deck was written 16:9, so a 4:3 deck came out stretched. A
+     * named size (16:9, 16:10, 4:3) keeps its `type`; anything else is custom,
+     * which PPTX expresses by leaving `type` off.
+     */
+    private function slideSizeXml(): string
+    {
+        $type = DesignUnits::slideSizeType($this->slideHeightEmu);
+
+        return '<p:sldSz cx="' . Emu::DEFAULT_SLIDE_WIDTH . '" cy="' . $this->slideHeightEmu . '"'
+            . ($type !== null ? ' type="' . $type . '"' : '')
+            . '/>';
     }
 
     /**
@@ -1592,7 +1614,7 @@ final class PptxWriter
         $id = $element['id'] ?? "text-{$shapeId}";
 
         $widthEmu = Emu::fromFracX((float) ($element['w'] ?? 0.8));
-        $heightEmu = Emu::fromFracY((float) ($element['h'] ?? 0.2));
+        $heightEmu = Emu::fromFracY((float) ($element['h'] ?? 0.2), $this->slideHeightEmu);
 
         return '<p:sp>'
             . '<p:nvSpPr>'
@@ -1602,7 +1624,7 @@ final class PptxWriter
             . '</p:nvSpPr>'
             . '<p:spPr>'
             . $xfrm
-            . BoxDecoration::spPr($style, $widthEmu, $heightEmu)
+            . BoxDecoration::spPr($style, $widthEmu, $heightEmu, $this->deckTheme)
             . '</p:spPr>'
             . $body
             . '</p:sp>';
@@ -1646,9 +1668,9 @@ final class PptxWriter
 
         // Box geometry in EMU.
         $boxX = Emu::fromFracX((float) ($element['x'] ?? 0));
-        $boxY = Emu::fromFracY((float) ($element['y'] ?? 0));
+        $boxY = Emu::fromFracY((float) ($element['y'] ?? 0), $this->slideHeightEmu);
         $boxW = max(1, Emu::fromFracX((float) ($element['w'] ?? 0)));
-        $boxH = max(1, Emu::fromFracY((float) ($element['h'] ?? 0)));
+        $boxH = max(1, Emu::fromFracY((float) ($element['h'] ?? 0), $this->slideHeightEmu));
 
         // Intrinsic dimensions (best effort — null when undeterminable).
         $intrinsic = @getimagesizefromstring($embed['bytes']);
@@ -1780,8 +1802,9 @@ final class PptxWriter
 
         [$fillHex, $fillAlpha] = Color::parse($element['fill'] ?? 'rgba(139,92,246,0.15)', '8B5CF6');
         [$strokeHex, $strokeAlpha] = Color::parse($element['stroke'] ?? '#8B5CF6', '8B5CF6');
+        // Design pixels, as fancy-slides draws it: the default 2px is 0.75pt.
         $strokeWidth = (float) ($element['strokeWidth'] ?? 2);
-        $strokeWidthEmu = Emu::fromPt($strokeWidth);
+        $strokeWidthEmu = Emu::fromPt(DesignUnits::toPt($strokeWidth, $this->deckTheme));
         $dashStr = !empty($element['dashed']) ? '<a:prstDash val="dash"/>' : '';
 
         $fillXml = $fillAlpha === 0
@@ -1831,7 +1854,8 @@ final class PptxWriter
         $code = (string) ($element['code'] ?? '');
         $id = $element['id'] ?? "code-{$shapeId}";
         $language = isset($element['language']) ? (string) $element['language'] : null;
-        $body = $this->buildHighlightedCodeBody($code, $language);
+        $style = is_array($element['style'] ?? null) ? $element['style'] : [];
+        $body = $this->buildHighlightedCodeBody($code, $language, (float) ($style['fontSize'] ?? 32));
 
         return '<p:sp>'
             . '<p:nvSpPr>'
@@ -1853,9 +1877,11 @@ final class PptxWriter
      * `<a:r>` per highlighted token so keywords / strings / comments /
      * numbers render in distinct colors.
      */
-    private function buildHighlightedCodeBody(string $code, ?string $language): string
+    private function buildHighlightedCodeBody(string $code, ?string $language, float $fontSizePx = 32.0): string
     {
-        $sz = Emu::hundredthsOfPoint(12);
+        // It was a fixed 12pt that no style could change. 32 design px is that
+        // same 12pt on the default canvas.
+        $sz = Emu::hundredthsOfPoint(DesignUnits::fontPt($fontSizePx, $this->deckTheme));
         $paragraphs = '';
         $lines = explode("\n", $code);
         foreach ($lines as $line) {
@@ -2559,12 +2585,10 @@ final class PptxWriter
      */
     private function buildTextBody(string $content, array $style, string $format): string
     {
-        $fontPt = (float) ($style['fontSize'] ?? 24);
-        // Convert the design-width-relative font size to a usable PPTX size.
-        // The fancy-slides design width is 1920px; PPTX assumes ~720px-wide
-        // rendering at 10 inches, so we apply a heuristic divisor of 2 to
-        // land in PPTX-sensible territory.
-        $pt = max(8.0, $fontPt / 2);
+        // Design pixels scaled with the canvas (see DesignUnits), defaulting to
+        // fancy-slides' own 28. This was a halving with an 8pt floor, which made
+        // PowerPoint text a third larger than the fancy-slides preview.
+        $pt = DesignUnits::fontPt((float) ($style['fontSize'] ?? 28), $this->deckTheme);
         $sz = Emu::hundredthsOfPoint($pt);
         $baseBold = $this->weightToBold($style['weight'] ?? null);
         $baseItalic = !empty($style['italic']) ? ' i="1"' : '';
@@ -2634,7 +2658,7 @@ final class PptxWriter
         }
 
         return '<p:txBody>'
-            . '<a:bodyPr wrap="square" anchor="' . substr($anchor, 3, -1) . '" rtlCol="0"' . BoxDecoration::bodyInsets($style) . '/>'
+            . '<a:bodyPr wrap="square" anchor="' . substr($anchor, 3, -1) . '" rtlCol="0"' . BoxDecoration::bodyInsets($style, $this->deckTheme) . '/>'
             . '<a:lstStyle/>'
             . $paragraphs
             . '</p:txBody>';
@@ -2685,10 +2709,10 @@ final class PptxWriter
             $out .= '<a:lnSpc><a:spcPct val="' . $pct . '"/></a:lnSpc>';
         }
         if (isset($style['spaceBefore']) && is_numeric($style['spaceBefore'])) {
-            $out .= '<a:spcBef><a:spcPts val="' . Emu::hundredthsOfPoint((float) $style['spaceBefore']) . '"/></a:spcBef>';
+            $out .= '<a:spcBef><a:spcPts val="' . Emu::hundredthsOfPoint(DesignUnits::toPt((float) $style['spaceBefore'], $this->deckTheme)) . '"/></a:spcBef>';
         }
         if (isset($style['spaceAfter']) && is_numeric($style['spaceAfter'])) {
-            $out .= '<a:spcAft><a:spcPts val="' . Emu::hundredthsOfPoint((float) $style['spaceAfter']) . '"/></a:spcAft>';
+            $out .= '<a:spcAft><a:spcPts val="' . Emu::hundredthsOfPoint(DesignUnits::toPt((float) $style['spaceAfter'], $this->deckTheme)) . '"/></a:spcAft>';
         }
 
         return $out;
@@ -2727,7 +2751,7 @@ final class PptxWriter
     {
         $out = '';
         if (isset($style['letterSpacing']) && is_numeric($style['letterSpacing'])) {
-            $out .= ' spc="' . Emu::hundredthsOfPoint((float) $style['letterSpacing']) . '"';
+            $out .= ' spc="' . Emu::hundredthsOfPoint(DesignUnits::toPt((float) $style['letterSpacing'], $this->deckTheme)) . '"';
         }
         $caps = $style['caps'] ?? null;
         if ($caps === 'small') {
@@ -2768,9 +2792,9 @@ final class PptxWriter
     private function xfrmFromFractions(array $element): string
     {
         $x = Emu::fromFracX((float) ($element['x'] ?? 0));
-        $y = Emu::fromFracY((float) ($element['y'] ?? 0));
+        $y = Emu::fromFracY((float) ($element['y'] ?? 0), $this->slideHeightEmu);
         $cx = Emu::fromFracX((float) ($element['w'] ?? 0));
-        $cy = Emu::fromFracY((float) ($element['h'] ?? 0));
+        $cy = Emu::fromFracY((float) ($element['h'] ?? 0), $this->slideHeightEmu);
         $rot = isset($element['rotation']) ? (int) round(((float) $element['rotation']) * 60000) : 0;
         $rotAttr = $rot !== 0 ? ' rot="' . $rot . '"' : '';
 

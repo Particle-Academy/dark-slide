@@ -80,11 +80,29 @@ return response(DarkSlide::toBytes($deck), 200, [
 
 ## Schema
 
-Mirrors `@particle-academy/fancy-slides`'s `Deck` shape exactly. Coordinates
-are 0..1 fractions; DarkSlide converts to PPTX EMU (914,400 per inch) on
-write.
+Mirrors `@particle-academy/fancy-slides`'s `Deck` shape exactly, and draws it
+the same size.
 
-See [`docs/schema.md`](./docs/schema.md) for the full reference.
+- **Position and size** (`x`, `y`, `w`, `h`) are 0..1 fractions of the slide.
+- **Every length** (`fontSize`, `strokeWidth`, `letterSpacing`, `spaceBefore`,
+  `spaceAfter`, `padding`, `radius`, border and accent-bar widths, table row
+  heights) is a design pixel on a canvas `theme.slideWidth` wide (1920 by
+  default), and keeps its share of the slide: `points = px × 720 / slideWidth`.
+  `fontSize: 96` is 36pt, 5% of the slide width, exactly as fancy-slides shows it.
+- **`theme.aspectRatio`** (width / height, 16/9 by default) shapes the slide,
+  which is always 10 inches wide.
+
+`Agent::jsonSchema()` is the full reference: every field carries a description
+with its unit and a worked example, and that is what an LLM tool definition
+should be given.
+
+### Upgrading from 0.9
+
+0.9 halved `fontSize` into points and took the other lengths as points. To keep
+0.9's output exactly, set `theme.slideWidth` to `1440` and double every length
+that was in points (`padding`, `letterSpacing`, `spaceBefore`, `spaceAfter`,
+`radius`, border and accent-bar widths, row heights, `strokeWidth`). Font sizes
+stay as they are.
 
 ## Element coverage (v0.5)
 

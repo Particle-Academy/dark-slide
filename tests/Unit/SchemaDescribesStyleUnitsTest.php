@@ -7,11 +7,11 @@ use DarkSlide\Agent;
 /**
  * The published schema tells a model what unit each style field is in.
  *
- * `style` was exported as a bare `{type: object}`. A model filling it in had only
- * the key names, and `fontSize` reads as points while the writer treats it as
- * design pixels and halves it (trap 5 in AGENTS.md). In the fancy-labs document
- * lab an agent described its headline as 232pt and the file carried 116pt. The
- * style object also mixes units, which no key name conveys.
+ * `style` was exported as a bare `{type: object}` until 0.9.2. A model filling it
+ * in had only the key names, and `fontSize` reads as points: in the fancy-labs
+ * document lab an agent described its headline as 232pt and the file carried
+ * 116pt. 0.10 gave every length in the object one unit, the design pixel, and
+ * the descriptions say so with worked examples.
  *
  * Two halves, because a description is only worth publishing if it is true:
  *
@@ -66,31 +66,42 @@ it('describes every style key the writer reads', function () {
     }
 });
 
-it('says fontSize is design pixels halved into points, and the file agrees', function () {
+it('says every length is a design pixel on the canvas', function () {
+    expect(sduStyle()['description'])
+        ->toContain('DESIGN PIXELS')
+        ->toContain('points = px x 720 / slideWidth');
+
+    foreach (['letterSpacing', 'spaceBefore', 'spaceAfter', 'radius', 'padding'] as $key) {
+        expect(sduStyle()['properties'][$key]['description'])->toContain('design pixels');
+    }
+});
+
+it('says what fontSize is written as, and the file agrees', function () {
     $description = sduStyle()['properties']['fontSize']['description'];
 
     expect($description)
-        ->toContain('DESIGN PIXELS')
-        ->toContain('96 is written as 48pt')
-        ->toContain('24 as 12pt')
-        ->toContain('anything under 16 as 8pt');
+        ->toContain('96 is written as 36pt')
+        ->toContain('28 as 10.5pt')
+        ->toContain('never below 1pt')
+        ->toContain('Default 28');
 
-    expect(sduSlideXml(['fontSize' => 96]))->toContain('sz="4800"');
-    expect(sduSlideXml(['fontSize' => 24]))->toContain('sz="1200"');
-    expect(sduSlideXml(['fontSize' => 10]))->toContain('sz="800"');
+    expect(sduSlideXml(['fontSize' => 96]))->toContain('sz="3600"');
+    expect(sduSlideXml(['fontSize' => 28]))->toContain('sz="1050"');
+    expect(sduSlideXml([]))->toContain('sz="1050"');
+    expect(sduSlideXml(['fontSize' => 2]))->toContain('sz="100"');
 });
 
-it('says which fields are already points, and the file agrees', function () {
+it('says what the other lengths are written as, and the file agrees', function () {
     $properties = sduStyle()['properties'];
 
-    expect($properties['letterSpacing']['description'])->toContain('2 is written as 2pt');
-    expect(sduSlideXml(['letterSpacing' => 2]))->toContain('spc="200"');
+    expect($properties['letterSpacing']['description'])->toContain('8 is written as 3pt');
+    expect(sduSlideXml(['letterSpacing' => 8]))->toContain('spc="300"');
 
-    expect($properties['spaceBefore']['description'])->toContain('6 is written as 6pt');
-    expect(sduSlideXml(['spaceBefore' => 6]))->toContain('<a:spcBef><a:spcPts val="600"/></a:spcBef>');
+    expect($properties['spaceBefore']['description'])->toContain('16 is written as 6pt');
+    expect(sduSlideXml(['spaceBefore' => 16]))->toContain('<a:spcBef><a:spcPts val="600"/></a:spcBef>');
 
-    expect($properties['padding']['description'])->toContain('12 is written as 12pt');
-    expect(sduSlideXml(['padding' => 12]))->toContain('lIns="152400"'); // 12pt x 12700 EMU
+    expect($properties['padding']['description'])->toContain('32 is written as 12pt');
+    expect(sduSlideXml(['padding' => 32]))->toContain('lIns="152400"'); // 12pt x 12700 EMU
 });
 
 it('says lineHeight is a multiple, and the file agrees', function () {
@@ -104,4 +115,12 @@ it('describes element position and size as fractions of the slide', function () 
     foreach (['x', 'y', 'w', 'h'] as $key) {
         expect($element[$key]['description'] ?? '')->toContain('FRACTION');
     }
+    expect($element['strokeWidth']['description'] ?? '')->toContain('design pixels');
+});
+
+it('describes the canvas the lengths are measured on', function () {
+    $theme = Agent::jsonSchema()['properties']['theme']['properties'];
+
+    expect($theme['slideWidth']['description'] ?? '')->toContain('1920 by default')->toContain('1440 reproduces');
+    expect($theme['aspectRatio']['description'] ?? '')->toContain('16/9 by default');
 });

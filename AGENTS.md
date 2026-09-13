@@ -110,12 +110,31 @@ none. `<a:gradFill>` with two stops at ADJACENT positions is a hard edge, so
 z-order the author has to get right, and two extra shape ids for the animation
 builder to renumber.
 
-### 5. `fontSize` is HALVED into points, everywhere
+### 5. Every length is a design pixel, converted in ONE place
 
-`fancy-slides` designs against a 1920px width; PPTX renders ~720px at 10 inches.
-`fontSize: 26` is 13pt. This is a schema-wide convention, not a table quirk, and
-a port that takes the number as points renders everything at double size while
-agreeing on every other value.
+`Helpers\DesignUnits::toPt()` is `px * 720 / designWidth`, where `designWidth` is
+`theme.slideWidth ?? 1920` and 720 is the 10in slide in points. `fontSize: 96` is
+36pt, which is 5% of the slide width in PowerPoint and in fancy-slides alike.
+
+- It applies to every AUTHORED length: `fontSize`, `strokeWidth`, `letterSpacing`,
+  `spaceBefore`/`spaceAfter`, `padding`, `radius`, border and accent-bar widths,
+  table row heights, and the composites' own defaults.
+- It does NOT apply to PowerPoint-native defaults that were never authored: the
+  7.2pt / 3.6pt insets, a 1pt box outline, a 0.75pt table rule, 40pt / 30pt
+  minimum rows, a 4pt accent bar, the 8pt gutter. A deck that never sets those is
+  unaffected, which is the point.
+- Compute it in exactly that order (`px * 720 / width`) in every engine. The EMU
+  and hundredths-of-a-point values are rounded from it, and a different operation
+  order can move a result across a rounding boundary.
+- `theme.aspectRatio` shapes the slide height (`DesignUnits::slideHeightEmu()`),
+  so every Y conversion takes `$this->slideHeightEmu`, never the 16:9 default.
+
+**Until 0.10 this was a halving** (`fontSize / 2`, 8pt floor) with every other
+length taken as points, on a 720pt slide. That made PowerPoint text a third larger
+than the fancy-slides preview, `Layout::fit` assumed a third canvas (1280), and one
+style object mixed two units. `theme.slideWidth: 1440` reproduces the old
+halving exactly; `tests/fixtures/reference-deck.json` uses it, with its
+former point lengths doubled, so the acceptance deck still renders as it did.
 
 ### 6. Composites are sugar and are read back as their expansion
 

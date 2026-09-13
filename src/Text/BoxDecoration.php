@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace DarkSlide\Text;
 
 use DarkSlide\Helpers\Color;
+use DarkSlide\Helpers\DesignUnits;
 use DarkSlide\Helpers\Emu;
 
 /**
@@ -34,9 +35,9 @@ final class BoxDecoration
      *
      * @param  array<string, mixed>  $style
      */
-    public static function spPr(array $style, int $widthEmu, int $heightEmu): string
+    public static function spPr(array $style, int $widthEmu, int $heightEmu, array $theme = []): string
     {
-        return self::geometry($style, $widthEmu, $heightEmu) . self::fill($style, $widthEmu) . self::line($style);
+        return self::geometry($style, $widthEmu, $heightEmu, $theme) . self::fill($style, $widthEmu, $theme) . self::line($style, $theme);
     }
 
     /** @param array<string, mixed> $style */
@@ -45,8 +46,11 @@ final class BoxDecoration
         return isset($style['fill']) || isset($style['accentBar']) || isset($style['border']) || isset($style['radius']);
     }
 
-    /** @param array<string, mixed> $style */
-    private static function geometry(array $style, int $widthEmu, int $heightEmu): string
+    /**
+     * @param  array<string, mixed>  $style
+     * @param  array<string, mixed>  $theme
+     */
+    private static function geometry(array $style, int $widthEmu, int $heightEmu, array $theme = []): string
     {
         $radius = $style['radius'] ?? null;
         if (! is_numeric($radius) || (float) $radius <= 0) {
@@ -55,14 +59,17 @@ final class BoxDecoration
 
         // `adj` is a proportion of HALF the shorter side, in 1/1000 of a percent.
         $shorter = max(1, min($widthEmu, $heightEmu));
-        $adj = (int) round(Emu::fromPt((float) $radius) / ($shorter / 2) * 100000);
+        $adj = (int) round(Emu::fromPt(DesignUnits::toPt((float) $radius, $theme)) / ($shorter / 2) * 100000);
         $adj = max(0, min(50000, $adj));
 
         return '<a:prstGeom prst="roundRect"><a:avLst><a:gd name="adj" fmla="val ' . $adj . '"/></a:avLst></a:prstGeom>';
     }
 
-    /** @param array<string, mixed> $style */
-    private static function fill(array $style, int $widthEmu): string
+    /**
+     * @param  array<string, mixed>  $style
+     * @param  array<string, mixed>  $theme
+     */
+    private static function fill(array $style, int $widthEmu, array $theme = []): string
     {
         $bar = is_array($style['accentBar'] ?? null) ? $style['accentBar'] : null;
         $hasFill = isset($style['fill']) && $style['fill'] !== false && $style['fill'] !== 'none';
@@ -79,7 +86,7 @@ final class BoxDecoration
         [$barHex] = Color::parse((string) ($bar['color'] ?? '#8B5CF6'), '8B5CF6');
         [$restHex] = Color::parse($hasFill ? (string) $style['fill'] : '#FFFFFF', 'FFFFFF');
 
-        $barEmu = Emu::fromPt((float) ($bar['width'] ?? 4));
+        $barEmu = Emu::fromPt(self::barWidthPt($bar, $theme));
         $pos = $widthEmu > 0 ? (int) round($barEmu / $widthEmu * 100000) : 1000;
         $pos = max(1, min(99998, $pos));
 
@@ -101,8 +108,11 @@ final class BoxDecoration
         return '<a:gradFill flip="none" rotWithShape="0"><a:gsLst>' . $stops . '</a:gsLst><a:lin ang="0" scaled="0"/></a:gradFill>';
     }
 
-    /** @param array<string, mixed> $style */
-    private static function line(array $style): string
+    /**
+     * @param  array<string, mixed>  $style
+     * @param  array<string, mixed>  $theme
+     */
+    private static function line(array $style, array $theme = []): string
     {
         $border = $style['border'] ?? null;
         if ($border === null || $border === false || $border === 'none') {
@@ -112,7 +122,8 @@ final class BoxDecoration
             return '';
         }
 
-        $width = isset($border['width']) && is_numeric($border['width']) ? (float) $border['width'] : 1.0;
+        // A stated width is design pixels; the default outline is 1pt.
+        $width = isset($border['width']) && is_numeric($border['width']) ? DesignUnits::toPt((float) $border['width'], $theme) : 1.0;
         if ($width <= 0) {
             return '';
         }
@@ -133,8 +144,9 @@ final class BoxDecoration
      * this feature to look broken.
      *
      * @param  array<string, mixed>  $style
+     * @param  array<string, mixed>  $theme
      */
-    public static function bodyInsets(array $style): string
+    public static function bodyInsets(array $style, array $theme = []): string
     {
         $padding = $style['padding'] ?? null;
         $bar = is_array($style['accentBar'] ?? null) ? $style['accentBar'] : null;
@@ -143,26 +155,47 @@ final class BoxDecoration
             return '';
         }
 
-        // PowerPoint's own defaults, which is what an undecorated box uses.
+        // PowerPoint's own defaults, in points, which is what an undecorated box uses.
         $sides = ['left' => 7.2, 'right' => 7.2, 'top' => 3.6, 'bottom' => 3.6];
 
         if ($bar !== null && ($bar['side'] ?? 'left') !== 'right') {
-            $sides['left'] = (float) ($bar['width'] ?? 4) + self::ACCENT_GUTTER_PT;
+            $sides['left'] = self::barWidthPt($bar, $theme) + self::ACCENT_GUTTER_PT;
         }
         if ($bar !== null && ($bar['side'] ?? 'left') === 'right') {
-            $sides['right'] = (float) ($bar['width'] ?? 4) + self::ACCENT_GUTTER_PT;
+            $sides['right'] = self::barWidthPt($bar, $theme) + self::ACCENT_GUTTER_PT;
         }
 
+        // Stated padding is design pixels.
         if (is_numeric($padding)) {
-            $sides = array_map(fn () => (float) $padding, $sides);
+            $sides = array_map(fn () => DesignUnits::toPt((float) $padding, $theme), $sides);
         } elseif (is_array($padding)) {
             foreach ($sides as $side => $_) {
                 if (isset($padding[$side]) && is_numeric($padding[$side])) {
-                    $sides[$side] = (float) $padding[$side];
+                    $sides[$side] = DesignUnits::toPt((float) $padding[$side], $theme);
                 }
             }
         }
 
+        return self::insetAttributes($sides);
+    }
+
+    /**
+     * The accent bar's width in points: a stated width is design pixels, the
+     * default bar is 4pt.
+     *
+     * @param  array<string, mixed>  $bar
+     * @param  array<string, mixed>  $theme
+     */
+    private static function barWidthPt(array $bar, array $theme): float
+    {
+        return isset($bar['width']) && is_numeric($bar['width'])
+            ? DesignUnits::toPt((float) $bar['width'], $theme)
+            : 4.0;
+    }
+
+    /** @param array<string, float> $sides */
+    private static function insetAttributes(array $sides): string
+    {
         return ' lIns="' . Emu::fromPt($sides['left']) . '"'
             . ' tIns="' . Emu::fromPt($sides['top']) . '"'
             . ' rIns="' . Emu::fromPt($sides['right']) . '"'

@@ -2,6 +2,55 @@
 
 ## [Unreleased]
 
+**BREAKING, for how big things are, not for any API.** Pre-1.0, so this lands in
+a minor.
+
+### Changed
+
+- **BREAKING: decks are drawn at the size fancy-slides draws them.** Every length
+  in a deck is now a design pixel on a canvas `theme.slideWidth` wide (1920 by
+  default) and converts as `points = px × 720 / slideWidth`. `fontSize: 96` is
+  36pt, 5% of the slide width, which is what fancy-slides shows.
+
+  Before, `fontSize` was halved into points with an 8pt floor (96 → 48pt, a third
+  larger than the preview) and every other length was taken as points, so one
+  style object mixed two units and text fitted in the preview overflowed in
+  PowerPoint. Now converted identically: `fontSize`, `strokeWidth`,
+  `letterSpacing`, `spaceBefore`, `spaceAfter`, `padding`, `radius`, border and
+  accent-bar widths, and table row heights. The floor is 1pt (PPTX's minimum).
+  Built-in defaults that are PowerPoint's own (text insets, a 1pt outline, a
+  0.75pt table rule, minimum row heights, a 4pt accent bar) stay in points.
+
+  **What to do:** nothing, if your decks were designed in fancy-slides; they now
+  match it. To keep a 0.9 deck's output exactly, set `theme.slideWidth: 1440` and
+  double every length you had written in points (the list above, minus
+  `fontSize`). Composites (`kpiBand`, `metadataGrid`) already did this to their
+  own defaults, so at 1440 they render as before.
+
+- **The text default is 28 design px** (10.5pt), fancy-slides' own default,
+  instead of 24.
+
+- **Code blocks take `style.fontSize`**, default 32 design px (12pt, the size
+  they were fixed at).
+
+- **`Layout::fit` estimates on the same canvas as the writer**: `slideWidth`
+  defaults to 1920 instead of 1280, and a new `aspectRatio` option replaces a
+  fixed 16:9. Text that fits in the preview is no longer shrunk.
+
+### Fixed
+
+- **`theme.aspectRatio` shapes the slide.** It was validated, published in the
+  schema and ignored, so a 4:3 deck came out stretched onto 16:9. The slide stays
+  10in wide; 16:9, 16:10 and 4:3 get PowerPoint's named `<p:sldSz type>`, any
+  other ratio a custom size.
+
+- **`Layout::fit` no longer needs `ext-mbstring`.** It called `mb_strlen`, which
+  this package never declared.
+
+- **The README linked to `docs/schema.md`, which does not exist.** It now
+  describes the unit model and points to `Agent::jsonSchema()`, the actual
+  reference.
+
 ### Added
 
 - **Embed the host's fonts in the file**, so brand typography survives machines

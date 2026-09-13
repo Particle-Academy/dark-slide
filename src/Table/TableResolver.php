@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace DarkSlide\Table;
 
+use DarkSlide\Helpers\DesignUnits;
+
 /**
  * Turns a loose agent-authored `table` element into a fully-resolved table,
  * where every cell already carries every decision. The writer only serialises
@@ -26,10 +28,18 @@ namespace DarkSlide\Table;
  * A key that is ABSENT falls through. A key present with the value `false`
  * stops the chain and means "off" — that distinction is why this code uses
  * `array_key_exists` rather than `??` in the places it does.
+ *
+ * ## Units
+ *
+ * Authored lengths (`fontSize`, `letterSpacing`, `padding`, border `width`, row
+ * `height` / `rowHeight`) are design pixels, like every other length in a deck,
+ * and come out in points through {@see DesignUnits}. The defaults below that are
+ * already points (insets, rule width, minimum row heights) stay points; only
+ * `DEFAULT_FONT_SIZE` is a design-pixel default, because a text size is authored.
  */
 final class TableResolver
 {
-    /** Schema font sizes are halved to points, matching text elements. */
+    /** Design pixels, like an authored `fontSize`: 10.5pt on the default 1920 canvas. */
     public const DEFAULT_FONT_SIZE = 28;
 
     public const DEFAULT_BODY_COLOR = '#0F172A';
@@ -116,12 +126,13 @@ final class TableResolver
                         'firstCol' => $c === 0,
                         'lastCol' => $c === count($columns) - 1,
                     ],
+                    $theme,
                 );
             }
 
             $rows[] = [
                 'header' => $isHeader,
-                'height' => self::rowHeight($rowSource, $rowStyle, $bandStyle, $tableStyle, $isHeader),
+                'height' => self::rowHeight($rowSource, $rowStyle, $bandStyle, $tableStyle, $isHeader, $theme),
                 'cells' => $cells,
             ];
         }
@@ -353,9 +364,10 @@ final class TableResolver
      * @param  array<string, mixed>  $column
      * @param  list<array<string, mixed>>  $chain  ordered low → high precedence
      * @param  array<string, bool>  $edges
+     * @param  array<string, mixed>  $theme
      * @return array<string, mixed>
      */
-    private static function resolveCell(array $slot, array $column, array $chain, array $edges): array
+    private static function resolveCell(array $slot, array $column, array $chain, array $edges, array $theme = []): array
     {
         $spec = $slot['spec'];
         $merged = $slot['merged'];
@@ -371,8 +383,8 @@ final class TableResolver
         }
 
         $fill = $resolved['fill'] ?? null;
-        $borders = self::resolveBorders($layers, $edges);
-        $padding = self::resolvePadding($resolved['padding'] ?? null);
+        $borders = self::resolveBorders($layers, $edges, $theme);
+        $padding = self::resolvePadding($resolved['padding'] ?? null, $theme);
 
         return [
             'text' => (string) ($spec['text'] ?? ''),
@@ -383,8 +395,8 @@ final class TableResolver
             'fill' => $fill === false || $fill === null || $fill === 'none' ? null : self::hex($fill, 'FFFFFF'),
             'align' => self::align($resolved['align'] ?? 'left'),
             'anchor' => self::anchor($resolved['anchor'] ?? 'middle'),
-            'fontSize' => max(1.0, (float) ($resolved['fontSize'] ?? self::DEFAULT_FONT_SIZE) / 2),
-            'letterSpacing' => (float) ($resolved['letterSpacing'] ?? 0),
+            'fontSize' => DesignUnits::fontPt((float) ($resolved['fontSize'] ?? self::DEFAULT_FONT_SIZE), $theme),
+            'letterSpacing' => DesignUnits::toPt((float) ($resolved['letterSpacing'] ?? 0), $theme),
             'caps' => self::caps($resolved['caps'] ?? 'none'),
             'fontFamily' => isset($resolved['fontFamily']) ? (string) $resolved['fontFamily'] : null,
             'padding' => $padding,
@@ -401,16 +413,20 @@ final class TableResolver
      *
      * @param  list<array<string, mixed>>  $layers  ordered low → high precedence
      * @param  array<string, bool>  $edges
+     * @param  array<string, mixed>  $theme
      * @return array<string, array<string, mixed>|null>
      */
-    private static function resolveBorders(array $layers, array $edges): array
+    private static function resolveBorders(array $layers, array $edges, array $theme = []): array
     {
         $sides = ['left' => 'firstCol', 'right' => 'lastCol', 'top' => 'firstRow', 'bottom' => 'lastRow'];
         $out = [];
 
         foreach ($sides as $side => $edgeKey) {
             $isOuter = $edges[$edgeKey];
-            $value = ['width' => self::DEFAULT_BORDER_WIDTH, 'color' => self::DEFAULT_BORDER_COLOR];
+            // No `width` here on purpose: an absent width is the DEFAULT, in
+            // points, while a stated one is design pixels. Seeding the default
+            // width would make `borderSide()` convert it as though authored.
+            $value = ['color' => self::DEFAULT_BORDER_COLOR];
 
             foreach ($layers as $layer) {
                 if (! array_key_exists('borders', $layer)) {
@@ -448,14 +464,17 @@ final class TableResolver
                 }
             }
 
-            $out[$side] = self::borderSide($value);
+            $out[$side] = self::borderSide($value, $theme);
         }
 
         return $out;
     }
 
-    /** @return array<string, mixed>|null */
-    private static function borderSide(mixed $value): ?array
+    /**
+     * @param  array<string, mixed>  $theme
+     * @return array<string, mixed>|null
+     */
+    private static function borderSide(mixed $value, array $theme = []): ?array
     {
         if ($value === false || $value === null || $value === 'none') {
             return null;
@@ -464,7 +483,7 @@ final class TableResolver
             return null;
         }
         $width = isset($value['width']) && is_numeric($value['width'])
-            ? (float) $value['width']
+            ? DesignUnits::toPt((float) $value['width'], $theme)
             : self::DEFAULT_BORDER_WIDTH;
         if ($width <= 0) {
             return null;
@@ -479,8 +498,11 @@ final class TableResolver
         ];
     }
 
-    /** @return array<string, float> */
-    private static function resolvePadding(mixed $padding): array
+    /**
+     * @param  array<string, mixed>  $theme
+     * @return array<string, float>
+     */
+    private static function resolvePadding(mixed $padding, array $theme = []): array
     {
         $default = [
             'left' => self::DEFAULT_PADDING_X,
@@ -490,14 +512,14 @@ final class TableResolver
         ];
 
         if (is_numeric($padding)) {
-            $v = (float) $padding;
+            $v = DesignUnits::toPt((float) $padding, $theme);
 
             return ['left' => $v, 'right' => $v, 'top' => $v, 'bottom' => $v];
         }
         if (is_array($padding)) {
             foreach ($default as $side => $_) {
                 if (isset($padding[$side]) && is_numeric($padding[$side])) {
-                    $default[$side] = (float) $padding[$side];
+                    $default[$side] = DesignUnits::toPt((float) $padding[$side], $theme);
                 }
             }
         }
@@ -559,11 +581,12 @@ final class TableResolver
      * @param  array<string, mixed>  $bandStyle
      * @param  array<string, mixed>  $tableStyle
      */
-    private static function rowHeight(array $rowSource, array $rowStyle, array $bandStyle, array $tableStyle, bool $isHeader): float
+    /** @param array<string, mixed> $theme */
+    private static function rowHeight(array $rowSource, array $rowStyle, array $bandStyle, array $tableStyle, bool $isHeader, array $theme = []): float
     {
         foreach ([$rowSource['height'] ?? null, $bandStyle['height'] ?? null, $tableStyle['rowHeight'] ?? null] as $candidate) {
             if (is_numeric($candidate)) {
-                return (float) $candidate;
+                return DesignUnits::toPt((float) $candidate, $theme);
             }
         }
 

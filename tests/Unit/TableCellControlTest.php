@@ -87,10 +87,10 @@ it('STATES that there is no border rather than omitting the element', function (
 
 it('emits all four per-cell borders with the requested width and colour', function () {
     $xml = tccSlide(tccTable([
-        'style' => ['borders' => ['width' => 1.5, 'color' => '#D8E0E8']],
+        'style' => ['borders' => ['width' => 4, 'color' => '#D8E0E8']],
     ]));
 
-    // 1.5pt = 19050 EMU (12700 EMU per point).
+    // 4 design px on the 1920 canvas = 1.5pt = 19050 EMU (12700 EMU per point).
     expect($xml)->toContain('<a:lnL w="19050"');
     expect($xml)->toContain('<a:lnR w="19050"');
     expect($xml)->toContain('<a:lnT w="19050"');
@@ -111,37 +111,37 @@ it('resolves outer and inner borders separately by cell position', function () {
     $xml = tccSlide(tccTable([
         'style' => [
             'borders' => [
-                'outer' => ['width' => 2, 'color' => '#1B3A5C'],
-                'inner' => ['width' => 0.5, 'color' => '#D8E0E8'],
+                'outer' => ['width' => 8, 'color' => '#1B3A5C'],
+                'inner' => ['width' => 2, 'color' => '#D8E0E8'],
             ],
         ],
     ]));
 
     $cells = tccCells($xml);
-    // Top-left header cell: left + top are outer (2pt = 25400), right + bottom inner (0.5pt = 6350).
-    expect($cells[0])->toContain('<a:lnL w="25400"');
-    expect($cells[0])->toContain('<a:lnT w="25400"');
-    expect($cells[0])->toContain('<a:lnR w="6350"');
-    expect($cells[0])->toContain('<a:lnB w="6350"');
+    // Top-left header cell: left + top are outer (8px = 3pt = 38100), right + bottom inner (2px = 0.75pt = 9525).
+    expect($cells[0])->toContain('<a:lnL w="38100"');
+    expect($cells[0])->toContain('<a:lnT w="38100"');
+    expect($cells[0])->toContain('<a:lnR w="9525"');
+    expect($cells[0])->toContain('<a:lnB w="9525"');
 
     // Bottom-right cell: right + bottom are outer.
     $last = $cells[count($cells) - 1];
-    expect($last)->toContain('<a:lnR w="25400"');
-    expect($last)->toContain('<a:lnB w="25400"');
-    expect($last)->toContain('<a:lnL w="6350"');
+    expect($last)->toContain('<a:lnR w="38100"');
+    expect($last)->toContain('<a:lnB w="38100"');
+    expect($last)->toContain('<a:lnL w="9525"');
 });
 
 it('lets a single side be turned off while the rest stay on', function () {
     $xml = tccSlide(tccTable([
         'style' => [
-            'borders' => ['all' => ['width' => 1, 'color' => '#D8E0E8'], 'left' => false, 'right' => false],
+            'borders' => ['all' => ['width' => 8, 'color' => '#D8E0E8'], 'left' => false, 'right' => false],
         ],
     ]));
 
     expect($xml)->toContain('<a:lnL><a:noFill/></a:lnL>');
     expect($xml)->toContain('<a:lnR><a:noFill/></a:lnR>');
-    expect($xml)->toContain('<a:lnT w="12700"');
-    expect($xml)->toContain('<a:lnB w="12700"');
+    expect($xml)->toContain('<a:lnT w="38100"'); // 8px = 3pt
+    expect($xml)->toContain('<a:lnB w="38100"');
 });
 
 it('carries a dashed border style through to prstDash', function () {
@@ -155,9 +155,9 @@ it('carries a dashed border style through to prstDash', function () {
 // ─── Insets + anchor, on the right element ────────────────────────────────
 
 it('writes cell insets as a:tcPr margins, not as a:bodyPr insets', function () {
-    $xml = tccSlide(tccTable(['style' => ['padding' => 9]]));
+    $xml = tccSlide(tccTable(['style' => ['padding' => 24]]));
 
-    // 9pt = 114300 EMU.
+    // 24 design px = 9pt = 114300 EMU.
     expect($xml)->toContain('marL="114300"');
     expect($xml)->toContain('marR="114300"');
     expect($xml)->toContain('marT="114300"');
@@ -170,9 +170,10 @@ it('writes cell insets as a:tcPr margins, not as a:bodyPr insets', function () {
 
 it('accepts per-side padding', function () {
     $xml = tccSlide(tccTable([
-        'style' => ['padding' => ['left' => 12, 'right' => 6, 'top' => 3, 'bottom' => 3]],
+        'style' => ['padding' => ['left' => 32, 'right' => 16, 'top' => 8, 'bottom' => 8]],
     ]));
 
+    // 32px = 12pt, 16px = 6pt, 8px = 3pt.
     expect($xml)->toContain('marL="152400"');
     expect($xml)->toContain('marR="76200"');
     expect($xml)->toContain('marT="38100"');
@@ -328,11 +329,11 @@ it('takes a configurable stripe fill and can switch striping off', function () {
 
 it('carries letter spacing and small caps into a header cell run', function () {
     $xml = tccSlide(tccTable([
-        'style' => ['header' => ['letterSpacing' => 1.2, 'caps' => 'small']],
+        'style' => ['header' => ['letterSpacing' => 8, 'caps' => 'small']],
     ]));
 
-    // 1.2pt = 120 hundredths.
-    expect($xml)->toContain('spc="120"');
+    // 8 design px = 3pt = 300 hundredths.
+    expect($xml)->toContain('spc="300"');
     expect($xml)->toContain('cap="small"');
 });
 
@@ -352,10 +353,10 @@ it('aligns a column and lets a cell override it', function () {
 
 it('honours an explicit row height', function () {
     $xml = tccSlide(tccTable([
-        'rows' => [['cells' => ['a' => 'x', 'b' => 'y'], 'height' => 50]],
+        'rows' => [['cells' => ['a' => 'x', 'b' => 'y'], 'height' => 128]],
     ]));
 
-    expect($xml)->toContain('<a:tr h="635000">'); // 50pt
+    expect($xml)->toContain('<a:tr h="609600">'); // 128 design px = 48pt
 });
 
 it('can suppress the header row entirely', function () {
