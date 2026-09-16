@@ -37,6 +37,20 @@ both run THIS package as a subprocess and compare every part. So:
   three, or land none.
 - The reader is different: nothing is serialised on the read side, so
   `Reader\PptxReader` uses SimpleXML freely.
+- **`read()` is a PURE function of its bytes**, and that is a contract rather
+  than an observation. The same package read twice — in the same second or a
+  year apart, on any machine — returns an identical structure, down to every
+  generated id, because consumers store reads and DIFF them: one clock- or
+  RNG-derived field turns a diff of unchanged content into a whole-deck replace.
+  The deck id is CRC-32 of the package bytes; an element whose `<p:cNvPr>`
+  carries no `name` is numbered by its position in the file. Nothing on the read
+  side may put the clock, a random number or the environment into a returned
+  value. Guarded by `tests/Unit/ReaderIsPureTest.php`.
+
+  Both parity suites used to DELETE the deck id before comparing, so neither
+  could see this — a comparison that drops the field it cannot explain asserts
+  nothing about it, and all three engines had the same bug, which a suite that
+  only detects disagreement will never report.
 
 ## Layout
 

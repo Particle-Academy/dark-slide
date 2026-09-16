@@ -119,6 +119,19 @@ stay as they are.
 | transitions | ✅ per-slide `transition` (fade / slide / zoom) + deck `defaultTransition` | ⚠ skipped |
 | animations | ✅ per-element `animation` (fade / fly-in / zoom / wipe) → `<p:timing>` build steps | ⚠ skipped |
 
+### Reading is deterministic
+
+`Agent::read()` is a **pure function of its bytes.** The same `.pptx` read
+twice — in the same second or a year apart, on this machine or another —
+returns an identical structure, down to every generated id. Reads can therefore
+be stored and diffed: two reads of unchanged bytes diff to nothing.
+
+The deck `id` is `imported-<crc32 of the file>`, and an element whose
+`<p:cNvPr>` carries no `name` to borrow one from gets `imported-<slide>-<nth>`
+from its position in the file. Before 0.10.1 the first came from `time()` and
+the second from `random_int()`, so a consumer diffing two reads of an unchanged
+file saw the whole deck replaced.
+
 ### What's new in v0.5
 
 - **Element entrance animations**. Add `animation: { effect, trigger?, direction?, duration?, delay?, order? }` to any element (`effect`: `fade` / `fly-in` / `zoom` / `wipe`). Slides with animations emit a real `<p:timing>` tree: builds are sorted by `(order, index)` and grouped into click steps (`on-click` opens a step; `with-prev` / `after-prev` attach to it), mirroring fancy-slides' build sequencer. Each build targets its shape by the exact `<p:cNvPr id>` it was emitted with; animated shapes start hidden and reveal when their build fires. Elements without `animation` are unaffected.

@@ -2,7 +2,29 @@
 
 ## [Unreleased]
 
+## v0.10.1 — 2026-09-16
+
+**`read()` is a pure function of its bytes again.** Reading the same `.pptx`
+twice returned two different structures, so a consumer diffing two reads of an
+unchanged file saw the whole deck replaced — a save that changed nothing storing
+the entire deck. Reported as
+[#9](https://github.com/Particle-Academy/dark-slide/issues/9).
+
+All three engines had it, identically, and all three are fixed:
+`@particle-academy/dark-slide` 0.8.1 and `fancy-dark-slide` 0.3.1 ship the same
+change.
+
 ### Changed
+
+- **Generated import ids have a new shape.** The deck id is now
+  `imported-<crc32>` — eight hex digits of the file's own CRC-32 — and an element
+  whose `<p:cNvPr>` carries no `name` to borrow one from is
+  `imported-<slide>-<nth>`, its position in the file.
+
+  **What to do: almost certainly nothing.** The old values came from `time()`
+  and `random_int()`, so no import id was ever reproducible and nothing could
+  have been keyed on one. Only code that PARSES an import id — expecting exactly
+  six hex digits after `imported-`, say — needs a look.
 
 - **The tag workflow is now `.github/workflows/publish.yml`, named `Publish`**
   (it was `release-gate.yml`, "Release gate"). Every Particle-Academy package
@@ -13,6 +35,26 @@
 
   **What you must do:** nothing. Only a script that looks runs up by the old
   file (`gh run list --workflow=release-gate.yml`) needs `publish.yml` instead.
+
+### Fixed
+
+- **The deck id came from the clock.** `Reader\PptxReader` minted it as
+  `'imported-' . dechex(time() & 0xFFFFFF)`, so the same file read either side of
+  a second boundary came back with a different id. It also COLLIDED: every deck
+  imported in the same second shared one id.
+
+- **An element with no `<p:cNvPr>` `name` got a random id** —
+  `random_int(1000, 9999)`, redrawn on EVERY read rather than only across a tick,
+  and therefore the worse half. A deck DarkSlide wrote always names its shapes,
+  so its own output never reached this path and no round-trip test could see it;
+  files from other producers reach it constantly.
+
+- **Neither parity suite could catch either one**, because both DELETED the deck
+  id before comparing the two engines. A comparison that drops the field it
+  cannot explain asserts nothing about it, and a parity suite only ever detects
+  DISAGREEMENT — three ports with the same bug agree perfectly. Both suites now
+  compare the id like every other field, and a new `ReaderIsPureTest` asserts the
+  property directly, including for elements that have no name to borrow.
 
 ## v0.10.0 — 2026-09-13
 

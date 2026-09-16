@@ -24,6 +24,14 @@ use ZipArchive;
  *
  * Agent-emitted decks from DarkSlide round-trip with high fidelity;
  * hand-authored PowerPoint files may drop styling we don't model.
+ *
+ * **read() is a pure function of its bytes.** The same package read twice —
+ * in the same second or a year apart, here or on another machine — comes back
+ * as an identical structure, down to every generated id. That is a contract
+ * rather than a property of the current code: consumers store reads and diff
+ * them, and one clock- or RNG-derived field turns a diff of unchanged content
+ * into a whole-deck replace. Nothing here may put the clock, a random number,
+ * the environment or a temp path into a value it returns.
  */
 final class PptxReader
 {
@@ -44,6 +52,31 @@ final class PptxReader
 
     /** ZipArchive being read; held during a single read() call so parsePic can resolve media. */
     private ?ZipArchive $currentZip = null;
+
+    /**
+     * CRC-32 of the package bytes as eight lowercase hex digits — the deck id
+     * this read returns. It was `time()` until 0.10.1, which made the id a
+     * function of the clock as well as the file: the same deck read either
+     * side of a tick came back different, so a consumer diffing two reads of
+     * unchanged bytes saw the whole deck replaced. CRC-32 rather than a
+     * cryptographic digest because all three engines already carry one for the
+     * zip container itself, so the trio agrees on the id without any of them
+     * growing a hashing dependency.
+     */
+    private string $packageDigest = '';
+
+    /**
+     * The 1-based number of the slide being parsed, and how many fallback ids
+     * have been minted for it. Together they replace a `random_int()` fallback
+     * for elements whose `<p:cNvPr>` carries no `name`. Numbering PER SLIDE is
+     * deliberate: inserting one shape into slide 1 then shifts only slide 1's
+     * ids instead of renumbering every element after it, which would turn a
+     * one-element edit into a whole-deck diff — the same failure the clock id
+     * caused, reached by an edit rather than by time.
+     */
+    private int $slideNumber = 0;
+
+    private int $slideFallbackIds = 0;
 
     /**
      * The slide size from `<p:sldSz>`, so geometry comes back as fractions of
@@ -75,6 +108,13 @@ final class PptxReader
      */
     public function fromBytes(string $bytes): array
     {
+        // Everything this read returns is derived from these bytes, here or
+        // below. The counters start over on every call because one reader
+        // instance may be handed a second file.
+        $this->packageDigest = sprintf('%08x', crc32($bytes));
+        $this->slideNumber = 0;
+        $this->slideFallbackIds = 0;
+
         $tmp = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR)
             . DIRECTORY_SEPARATOR
             . 'dark-slide-read-' . bin2hex(random_bytes(8));
@@ -104,7 +144,7 @@ final class PptxReader
     private function extract(ZipArchive $zip): array
     {
         $deck = [
-            'id' => 'imported-' . dechex(time() & 0xFFFFFF),
+            'id' => 'imported-' . $this->packageDigest,
             'title' => $this->readCoreTitle($zip) ?? 'Imported',
             'theme' => ['name' => 'imported'],
             'slides' => [],
@@ -135,6 +175,8 @@ final class PptxReader
             $slideRels = $zip->getFromName('ppt/' . dirname($slideTarget) . '/_rels/' . basename($slideTarget) . '.rels') ?: '';
             $notes = $this->readNotesFor($zip, $slideRels);
             $this->currentSlideRels = $this->parseSlideRels($slideRels, $slideTarget);
+            $this->slideNumber = $i + 1;
+            $this->slideFallbackIds = 0;
 
             $slide = $this->parseSlide($slideXml, 'imported-slide-' . ($i + 1), $notes);
             $deck['slides'][] = $slide;
@@ -550,6 +592,20 @@ final class PptxReader
     }
 
     /**
+     * An id for an element whose `<p:cNvPr>` carries no `name` to borrow one
+     * from: its position in the file, as `imported-<slide>-<nth>`. Callers
+     * reach it through `??`, which does not evaluate it unless the name is
+     * genuinely absent, so the numbering stays tied to the file rather than to
+     * how many elements were parsed.
+     */
+    private function nextFallbackId(string $prefix = 'imported-'): string
+    {
+        $this->slideFallbackIds++;
+
+        return $prefix . $this->slideNumber . '-' . $this->slideFallbackIds;
+    }
+
+    /**
      * @return array<string, mixed>|null
      */
     private function parseShape(SimpleXMLElement $sp): ?array
@@ -572,7 +628,7 @@ final class PptxReader
         $cy = (int) $extent['cy'];
 
         $base = [
-            'id' => (string) ($sp->xpath('.//p:cNvPr')[0]['name'] ?? 'imported-' . random_int(1000, 9999)),
+            'id' => (string) ($sp->xpath('.//p:cNvPr')[0]['name'] ?? $this->nextFallbackId()),
             'x' => $this->fracX($x),
             'y' => $this->fracY($y),
             'w' => $this->fracX($cx),
@@ -656,7 +712,7 @@ final class PptxReader
         }
 
         return [
-            'id' => (string) ($pic->xpath('.//p:cNvPr')[0]['name'] ?? 'imported-' . random_int(1000, 9999)),
+            'id' => (string) ($pic->xpath('.//p:cNvPr')[0]['name'] ?? $this->nextFallbackId()),
             'type' => 'image',
             'x' => $this->fracX((int) $offset['x']),
             'y' => $this->fracY((int) $offset['y']),
@@ -744,7 +800,7 @@ final class PptxReader
         }
 
         return [
-            'id' => (string) ($gf->xpath('.//p:cNvPr')[0]['name'] ?? 'imported-table-' . random_int(1000, 9999)),
+            'id' => (string) ($gf->xpath('.//p:cNvPr')[0]['name'] ?? $this->nextFallbackId('imported-table-')),
             'type' => 'table',
             'x' => $this->fracX((int) $offset['x']),
             'y' => $this->fracY((int) $offset['y']),
