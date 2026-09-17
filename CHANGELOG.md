@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Added
+
+- **A threshold-free guard on the differ: *does the diff mention the part that
+  did not change?*** A surgical edit cannot; a whole-deck replace must. Ported
+  from the consumer who found the v0.10.4 regression, at their suggestion — it
+  belongs on the producer rather than one consumer downstream, and it is the
+  check that would have caught v0.10.3 here.
+
+  **It deliberately has no threshold.** The guard it replaces on their side
+  asked for "at most N operations and fewer bytes than the file", and both were
+  true of every whole-deck replace v0.10.3 emitted: a `deck.replace` really is
+  one operation and a two-slide deck really does serialise smaller than its own
+  zip. That suite ran 715 green while every edit stored the entire document.
+  Anything phrased as a bound is eventually satisfied by a replace.
+
+  Verified in both directions rather than asserted: red on the v0.10.3 code path
+  (4 of 5 cases), green on v0.10.4. A guard nobody has watched fail is not yet a
+  guard.
+
 ## v0.10.4 — 2026-09-16
 
 ### Fixed
