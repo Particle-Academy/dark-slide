@@ -24,18 +24,27 @@ use DarkSlide\Reader\PptxReader;
  * sleeps to force it pays a second on every run to test a symptom rather than
  * the property. Same bytes agree; different bytes disagree.
  *
- * **0.10.1's fix was half a fix, and every test in this file passed anyway.**
- * It derived the id from the whole package, and the package embeds `gmdate()`
- * in `docProps/core.xml` — so the clock read moved from HERE to the writer.
- * Two reads of one buffer still agreed, which is all these cases asked, while a
- * deck saved and re-read got a different id EVERY time instead of one in five.
- * That broke pptx version history in a consumer's shipped product.
+ * **It took three releases to state the property at the right level**, and the
+ * first two both passed a suite that looked thorough:
  *
- * The lesson is in the shape of the cases below, not in the fix: every one of
- * them read the same buffer twice. A defect one serialisation away was outside
- * what any of them could see. `it keeps the deck id when a save changed
- * nothing` is the case that reaches it, and `it derives the deck id from the
- * deck, not from when it was saved` is the fast deterministic form.
+ *   0.10.1  id = digest(whole package)         followed the WRITER's clock
+ *   0.10.2  id = digest(package minus core.xml) removed the clock, kept bytes
+ *   0.10.3  id = digest(the deck read() returns)
+ *
+ * The middle one is the instructive failure. Excluding the clock-bearing part
+ * removed one source of byte variance and left the others: a deck carrying a
+ * shape or a code block re-serialises to different `ppt/slides/slideN.xml`
+ * bytes, so the id still moved while the structure sat perfectly still. A digest
+ * of bytes identifies a SERIALISATION; two serialisations of one deck are not
+ * byte-equal, and no exclusion list was ever going to make them so.
+ *
+ * So the property is now: **any two byte layouts that read to the same structure
+ * get the same id.** Note what that does NOT say — that a file from another
+ * producer and one of ours "of the same deck" agree. That holds only as far as
+ * `read()` normalises them to the same structure, which is not promised.
+ * `foreign-libreoffice.pptx` shows both halves: re-serialising what we read from
+ * it keeps the id, while our own rendering of the same source deck reads to a
+ * different structure and correctly gets a different id.
  */
 
 /** The nine-slide acceptance deck, as written .pptx bytes. */
@@ -173,30 +182,127 @@ it('gives two different decks two different ids', function () {
     expect($a['id'])->not->toBe($b['id']);
 });
 
-it('gives a renamed deck the SAME id, because the title lives in the excluded part', function () {
-    // A consequence of excluding `docProps/core.xml` whole, recorded here so it
-    // is a decision rather than something the next person discovers. `<dc:title>`
-    // shares that part with the save timestamp, so a rename does not move the
-    // id — the returned `title` still changes, so a differ still sees the
-    // rename, and treating a renamed deck as the same deck is defensible on its
-    // own terms. Narrowing the exclusion to the two `<dcterms:*>` elements would
-    // change this, at the cost of regexing XML inside the digest path in three
-    // engines; it was measured as unnecessary and deliberately not done.
+it('gives a renamed deck a different id, because a title is content', function () {
+    // 0.10.2 did the opposite, as a side effect of excluding `docProps/core.xml`
+    // whole — `<dc:title>` lives in that part. Digesting the deck rather than the
+    // package puts the title back where it belongs: `read()` returns it, so it
+    // counts.
     $json = (string) file_get_contents(__DIR__ . '/../fixtures/reference-deck.json');
     $deck = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
-    $deck['title'] = 'Renamed, same deck';
+    $deck['title'] = 'Renamed, and that is a change';
     $renamed = (new PptxReader())->fromBytes(Agent::toBytes($deck));
     $original = (new PptxReader())->fromBytes(pureRefBytes());
 
     expect($renamed['title'])->not->toBe($original['title'])
-        ->and($renamed['id'])->toBe($original['id']);
+        ->and($renamed['id'])->not->toBe($original['id']);
+});
+
+it('gives two byte layouts of one structure the SAME id', function () {
+    // THE property. Everything else in this file is a corollary of it.
+    //
+    // A shape element is the cheap way to induce it: our own writer does not
+    // re-serialise a read-back shape to the same `ppt/slides/slide1.xml` bytes,
+    // so these two packages genuinely differ on disk while reading to one deck.
+    // The byte-difference is asserted first, because a test where the two
+    // buffers happened to be identical would pass while proving nothing.
+    $deck = [
+        'id' => 'two-layouts',
+        'title' => 'Two Layouts',
+        'theme' => ['name' => 'default'],
+        'slides' => [[
+            'id' => 's1',
+            'layout' => 'blank',
+            'elements' => [['id' => 'r1', 'type' => 'shape', 'shape' => 'rect', 'x' => 0.1, 'y' => 0.1, 'w' => 0.3, 'h' => 0.3, 'fill' => '#FF0000']],
+        ]],
+    ];
+
+    $layoutA = Agent::toBytes($deck);
+    $readA = (new PptxReader())->fromBytes($layoutA);
+    $layoutB = Agent::toBytes($readA);
+    $readB = (new PptxReader())->fromBytes($layoutB);
+
+    $withoutId = function (array $d): array {
+        unset($d['id']);
+
+        return $d;
+    };
+
+    expect($layoutB)->not->toBe($layoutA)
+        ->and($withoutId($readB))->toBe($withoutId($readA))
+        ->and($readB['id'])->toBe($readA['id']);
+});
+
+it('reads a foreign producer and our re-serialisation of it to one id', function () {
+    // The consumer's production shape: version 1 of a deck is the file a user
+    // uploaded, every version after it is ours. So the first edit of every
+    // upload diffs a FOREIGN serialisation against one of ours.
+    //
+    // Neither this repo nor its two ports had a single `.pptx` fixture before
+    // this one — every fixture was generated by our own writer at test time,
+    // which is the same blind spot that left the reader's `random_int` path
+    // unexercised for ten minor versions. See the note on the fixture below.
+    $foreign = (string) file_get_contents(__DIR__ . '/../fixtures/foreign-libreoffice.pptx');
+
+    $first = (new PptxReader())->fromBytes($foreign);
+    $ours = Agent::toBytes($first);
+    $second = (new PptxReader())->fromBytes($ours);
+
+    expect($first['slides'])->not->toBeEmpty()
+        ->and($ours)->not->toBe($foreign)
+        ->and($second['id'])->toBe($first['id']);
+});
+
+it('does NOT claim a foreign file and ours of one source deck share an id', function () {
+    // The limit of the property, asserted so nobody widens the claim by
+    // accident. `read()` recovers what it can model; LibreOffice's rendering of
+    // this deck and ours do not reduce to the same structure, so the two ids
+    // differ — correctly. The guarantee is about byte layouts of one STRUCTURE,
+    // not about two producers' idea of one deck.
+    $foreign = (string) file_get_contents(__DIR__ . '/../fixtures/foreign-libreoffice.pptx');
+    $source = json_decode(
+        (string) file_get_contents(__DIR__ . '/../fixtures/foreign-libreoffice-source.json'),
+        true,
+        512,
+        JSON_THROW_ON_ERROR,
+    );
+
+    $fromForeign = (new PptxReader())->fromBytes($foreign);
+    $fromOurs = (new PptxReader())->fromBytes(Agent::toBytes($source));
+
+    expect($fromForeign['id'])->not->toBe($fromOurs['id']);
+});
+
+it('uses only ASCII keys, which is what lets three engines sort them alike', function () {
+    // The canonical encoding sorts map keys, and the three engines' sorts agree
+    // only below U+10000 (JS sorts UTF-16 code units, PHP bytes, Python code
+    // points). Every key a read deck contains is machine-generated, so this is
+    // true by construction — checked rather than assumed, because the digest
+    // silently depends on it.
+    $keys = [];
+    $walk = function ($value) use (&$walk, &$keys): void {
+        if (!is_array($value)) {
+            return;
+        }
+        foreach ($value as $key => $item) {
+            if (is_string($key)) {
+                $keys[$key] = true;
+            }
+            $walk($item);
+        }
+    };
+    $walk((new PptxReader())->fromBytes(pureRefBytes()));
+    $walk((new PptxReader())->fromBytes((string) file_get_contents(__DIR__ . '/../fixtures/foreign-libreoffice.pptx')));
+
+    expect($keys)->not->toBeEmpty()
+        ->and(array_values(array_filter(array_keys($keys), fn (string $k): bool => preg_match('/[^\x20-\x7E]/', $k) === 1)))
+        ->toBe([]);
 });
 
 it('derives the deck id from the deck, not from when it was saved', function () {
-    // The deterministic form of the case below, and the one that says WHY:
-    // `docProps/core.xml` is the only entry a second save of one deck changes,
-    // so the id must not depend on it. Measured, not assumed — of this
-    // package's 43 entries, it is the only one that differs across a save.
+    // The clock, specifically: `docProps/core.xml` carries the save stamp, and a
+    // digest over the deck cannot see it because `read()` does not return it.
+    // Kept as its own case because it is the fast deterministic form — no second
+    // serialisation needed — and because it is the exact defect 0.10.1 shipped.
     $bytes = pureRefBytes();
     $restamped = pureRestamped($bytes, '2019-01-01T00:00:00Z');
 
@@ -210,11 +316,13 @@ it('keeps the deck id when a save changed nothing', function () {
     // other test here reads ONE buffer twice, so a defect that needs a second
     // serialisation to appear is invisible to all of them.
     //
-    // It starts from the SETTLED read form rather than from the authored deck,
-    // because the reader is lossy by design — a composite comes back as the
-    // table it became — so the first read-write-read genuinely changes the deck
-    // and is supposed to change the id with it. What must hold is that it then
-    // stops: from that point a save that changed nothing changes nothing.
+    // It starts from the SETTLED read form rather than from the authored deck.
+    // The reader IS lossy for some constructs — a composite comes back as the
+    // table it became — so the first read-write-read can genuinely change the
+    // deck, and an id that moves with it is right. Take care with that sentence:
+    // it was once used to excuse an id moving while the structure did not, which
+    // is a different thing and was the 0.10.2 bug. What is asserted here is that
+    // the STRUCTURE settles and the id settles with it.
     $settled = (new PptxReader())->fromBytes(Agent::toBytes((new PptxReader())->fromBytes(pureRefBytes())));
 
     // Forced, not hoped for. Two writes inside one second share a timestamp and

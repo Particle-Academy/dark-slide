@@ -42,9 +42,11 @@ both run THIS package as a subprocess and compare every part. So:
   year apart, on any machine — returns an identical structure, down to every
   generated id, because consumers store reads and DIFF them: one clock- or
   RNG-derived field turns a diff of unchanged content into a whole-deck replace.
-  The deck id is CRC-32 over the package's entries EXCEPT `docProps/core.xml`;
-  an element whose `<p:cNvPr>` carries no `name` is numbered by its position in
-  the file. Nothing on the read
+  The deck id is CRC-32 over a canonical encoding of the deck itself; an element
+  whose `<p:cNvPr>` carries no `name` is numbered by its position in the file.
+  (Our own writer names every `<p:cNvPr>` the reader consults — measured across
+  10 fixtures and 27 such nodes — so our decks never reach that fallback; files
+  from other producers are what reach it.) Nothing on the read
   side may put the clock, a random number or the environment into a returned
   value. Guarded by `tests/Unit/ReaderIsPureTest.php`.
 
@@ -53,15 +55,30 @@ both run THIS package as a subprocess and compare every part. So:
   nothing about it, and all three engines had the same bug, which a suite that
   only detects disagreement will never report.
 
-  **Deriving it from the package is not the same as deriving it from the deck**,
-  and 0.10.1 shipped the difference: the id was CRC-32 of the WHOLE package, and
-  the package embeds a write-time stamp in `docProps/core.xml`. Two reads of one
-  buffer still agreed — so every purity test passed — while a deck saved and
-  re-read got a new id every time, which deterministically broke pptx version
-  history in a consumer's product. The digest now skips that one entry, measured
-  as the only one of 43 that a re-save changes. Its side effect is deliberate and
-  pinned by a test: `<dc:title>` lives there too, so renaming a deck does not
-  change its id.
+  **The id is a digest of the CONTENT, and that took three releases to get
+  right.** 0.10.1 hashed the whole package, so it followed the writer's clock.
+  0.10.2 excluded the clock-bearing `docProps/core.xml`, which removed ONE source
+  of byte variance and left the rest — a deck with a shape or a code block
+  re-serialises to different `ppt/slides/slideN.xml` bytes, so the id still moved
+  while the structure sat perfectly still. Bytes were simply the wrong basis: a
+  digest of bytes identifies a SERIALISATION, and no exclusion list makes two
+  serialisations of one deck byte-equal.
+
+  **The canonical encoding is a cross-engine contract, not an implementation
+  detail.** Three engines must digest one structure to one value, so the encoding
+  is written out in full in each reader and must be changed in all three at once.
+  The traps it exists to close: number TYPE differs by language (`int/int` is an
+  int in PHP, always a float in Python, always a double in JS) and float
+  RENDERING depends on PHP's `serialize_precision` ini, so numbers go in as raw
+  IEEE-754 bits; PHP cannot tell an empty list from an empty map, so both
+  collapse to one marker; keys are sorted, and every key a read deck contains is
+  machine-generated ASCII, which the purity suite CHECKS rather than assumes.
+
+  **`tests/fixtures/foreign-libreoffice.pptx` is the first `.pptx` fixture any of the three repos
+  ever had.** Every other fixture is written by our own writer at test time,
+  which is one blind spot shared by all three — the reader's RNG path went
+  unexercised the same way. It is produced with LibreOffice; regenerate it with
+  the command in the purity suite's docblock.
 
 ## Layout
 

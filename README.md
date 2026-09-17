@@ -126,19 +126,25 @@ twice — in the same second or a year apart, on this machine or another —
 returns an identical structure, down to every generated id. Reads can therefore
 be stored and diffed: two reads of unchanged bytes diff to nothing.
 
-The deck `id` is `imported-<crc32 of the file>`, and an element whose
+The deck `id` is `imported-<crc32 of the deck>`, and an element whose
 `<p:cNvPr>` carries no `name` to borrow one from gets `imported-<slide>-<nth>`
-from its position in the file. The CRC-32 is taken over every entry EXCEPT `docProps/core.xml`, which is the
-one part of a package that is about the save rather than about the deck — it
-carries the write-time `<dcterms:modified>` stamp. Saving a deck that changed
-nothing therefore yields the same id.
+from its position in the file.
 
-Before 0.10.1 the first came from `time()` and the second from `random_int()`, so a
-consumer diffing two reads of an unchanged file saw the whole deck replaced.
-0.10.1 hashed the whole package instead, which moved that clock read to write
-time and made it worse — the id then changed on every save. Note that excluding
-that part whole means a deck's `<dc:title>` is outside the id, so **renaming a
-deck does not change its id**; the returned `title` still changes.
+The CRC-32 is taken over the **deck this returns**, not over the package bytes.
+That distinction is the whole point: a digest of bytes identifies a
+*serialisation*, and two serialisations of one deck are never byte-equal — a
+re-save rewrites `ppt/slides/slideN.xml` for a deck carrying a shape or a code
+block, quite apart from the save timestamp. So the guarantee is:
+
+> **Any two byte layouts that read to the same structure get the same id.**
+
+Read that precisely. It does **not** say that a file from another producer and
+one of ours "of the same deck" share an id — that holds only as far as `read()`
+normalises them to the same structure, which is not promised.
+
+Before 0.10.1 the first came from `time()` and the second from `random_int()`. 0.10.1 and 0.10.2
+both derived it from the package bytes, which is why 0.10.3 is the third attempt
+at one defect.
 
 ### What's new in v0.5
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace DarkSlide\Reader;
 
 use DarkSlide\Helpers\Emu;
+use HashContext;
 use RuntimeException;
 use SimpleXMLElement;
 use ZipArchive;
@@ -33,13 +34,21 @@ use ZipArchive;
  * into a whole-deck replace. Nothing here may put the clock, a random number,
  * the environment or a temp path into a value it returns.
  *
- * **And reading its OWN clock is only half of that.** A value derived from a
- * part the WRITER stamps with the clock is just as impure, one step removed,
- * and it is worse: two reads of one buffer agree, so it looks fixed, while a
- * deck serialised and re-serialised — a consumer saving a file that changed
- * nothing — diverges every single time. That is what 0.10.1 shipped. Anything
- * derived from the package must therefore skip the parts that are about the
- * SAVE rather than about the deck; see `DIGEST_EXCLUDED_PART`.
+ * **The id is a function of the CONTENT, never of the package bytes.** That
+ * distinction took three attempts to state correctly, so it is worth being
+ * blunt about: a digest of the bytes identifies a SERIALISATION, and two
+ * serialisations of one deck are not byte-equal. 0.10.1 hashed the whole
+ * package, which followed the writer's clock. 0.10.2 excluded the clock-bearing
+ * part, which removed ONE source of byte variance and left the rest — a deck
+ * carrying a shape or a code block still re-serialises to different
+ * `ppt/slides/slideN.xml` bytes, so the id still moved while the structure sat
+ * perfectly still. `contentDigest()` hashes what this method RETURNS.
+ *
+ * The consequence to hold on to: **any two byte layouts that read to the same
+ * structure get the same id.** It does NOT follow that a PowerPoint-authored
+ * file and a DarkSlide-authored file of "the same deck" agree — that holds only
+ * as far as `read()` normalises them to the same structure, which is not
+ * promised here and is not what this guarantees.
  */
 final class PptxReader
 {
@@ -61,36 +70,6 @@ final class PptxReader
     /** ZipArchive being read; held during a single read() call so parsePic can resolve media. */
     private ?ZipArchive $currentZip = null;
 
-    /**
-     * The one part left out of the deck id, because it is the one part that is
-     * not about the deck. `docProps/core.xml` carries `<dcterms:created>` and
-     * `<dcterms:modified>`, which the writer stamps with `gmdate()`, so it is
-     * the only entry that differs between two serialisations of one deck.
-     *
-     * Measured rather than assumed, and the measurement is why this is exactly
-     * one name long: of a 43-entry package written either side of a second
-     * boundary, ONE entry differed. Do not widen this to a metadata set on
-     * suspicion — `docProps/app.xml` and the rest were measured stable, and a
-     * speculative exclusion is a guess someone has to unpick later.
-     */
-    private const DIGEST_EXCLUDED_PART = 'docProps/core.xml';
-
-    /**
-     * CRC-32 over the package's entries as eight lowercase hex digits — the
-     * deck id this read returns. CRC-32 rather than a cryptographic digest
-     * because all three engines already carry one for the zip container
-     * itself, so the trio agrees on the id without any of them growing a
-     * hashing dependency.
-     *
-     * It was `time()` until 0.10.1 and the whole package's bytes until 0.10.2.
-     * Both were impure; the second was worse. `time()` moved only across a
-     * tick, so a re-read was wrong about one time in five. Hashing the whole
-     * file moved the clock read from HERE to the writer — `docProps/core.xml`
-     * is stamped at save time — and the two serialisations a round trip
-     * compares are always written apart, so it diverged 14 times out of 14 and
-     * broke pptx version history in a consumer's shipped product.
-     */
-    private string $packageDigest = '';
 
     /**
      * The 1-based number of the slide being parsed, and how many fallback ids
@@ -137,9 +116,7 @@ final class PptxReader
     {
         // Everything this read returns is derived from these bytes, here or
         // below. The counters start over on every call because one reader
-        // instance may be handed a second file; the digest is taken in
-        // extract(), which is where the opened archive is.
-        $this->packageDigest = '';
+        // instance may be handed a second file.
         $this->slideNumber = 0;
         $this->slideFallbackIds = 0;
 
@@ -157,6 +134,10 @@ final class PptxReader
         try {
             $this->currentZip = $zip;
             $deck = $this->extract($zip);
+            // Stamped HERE rather than inside extract() because extract() has
+            // early returns for a malformed package, and an id that some return
+            // paths skip is worse than one that is wrong.
+            $deck['id'] = 'imported-' . $this->contentDigest($deck);
         } finally {
             $this->currentZip = null;
             $zip->close();
@@ -171,10 +152,11 @@ final class PptxReader
      */
     private function extract(ZipArchive $zip): array
     {
-        $this->packageDigest = $this->digestOf($zip);
-
         $deck = [
-            'id' => 'imported-' . $this->packageDigest,
+            // Filled in by fromBytes() once the deck is complete — the digest is
+            // over the content, so it cannot exist before the content does.
+            // Declared first so the returned key order is unchanged.
+            'id' => '',
             'title' => $this->readCoreTitle($zip) ?? 'Imported',
             'theme' => ['name' => 'imported'],
             'slides' => [],
@@ -622,30 +604,133 @@ final class PptxReader
     }
 
     /**
-     * CRC-32 over every entry of the package except `DIGEST_EXCLUDED_PART`.
+     * The deck id: CRC-32 over a canonical encoding of the DECK, as eight
+     * lowercase hex digits. Not of the package — see the note on this class.
      *
-     * Entry names go in alongside their contents, so moving a part cannot leave
-     * the id unchanged. The walk is in archive order, which is what every
-     * engine's zip reader enumerates — that, plus CRC-32 being the one digest
-     * all three already have, is what makes two engines read one file to the
-     * same id.
+     * `id` is removed first, because it is the value being computed. Nothing
+     * else is removed: every other field is either read out of the file or
+     * derived deterministically from it (`imported-slide-N`, and an element's
+     * positional fallback id), so all of it is content.
      */
-    private function digestOf(ZipArchive $zip): string
+    private function contentDigest(array $deck): string
     {
+        unset($deck['id']);
+
         $ctx = hash_init('crc32b');
-        for ($i = 0; $i < $zip->numFiles; $i++) {
-            $name = (string) $zip->getNameIndex($i);
-            if ($name === self::DIGEST_EXCLUDED_PART) {
-                continue;
-            }
-            $content = $zip->getFromIndex($i);
-            hash_update($ctx, $name);
-            hash_update($ctx, "\0");
-            hash_update($ctx, $content === false ? '' : $content);
-            hash_update($ctx, "\0");
-        }
+        $this->canonicalize($deck, $ctx);
 
         return hash_final($ctx);
+    }
+
+    /**
+     * Feed one value to the digest in a form all three engines agree on.
+     *
+     * This is a CANONICAL ENCODING and its rules are the contract, not an
+     * implementation detail — the Node and Python ports reimplement it and the
+     * reader-parity suites compare the resulting id, so a divergence here is a
+     * divergence in the id. Spelled out:
+     *
+     *   null          `~`
+     *   true / false  `T` / `F`
+     *   number        `#` then the eight bytes of the IEEE-754 binary64, big endian
+     *   string        `s`, the UTF-8 BYTE length in decimal, `:`, then the bytes
+     *   empty array   `e`
+     *   list          `[` then each item, then `]`
+     *   map           `{` then each key then its value, keys ascending, then `}`
+     *
+     * Three of those choices are load-bearing:
+     *
+     * **Numbers go in as raw IEEE bits, never as text.** The three languages
+     * disagree about the TYPE of a number — PHP's `int / int` is an int when it
+     * divides exactly, Python's `/` is always a float, JS has only doubles — and
+     * about how a float RENDERS: PHP's depends on the `serialize_precision` ini
+     * setting, which a consumer can change underneath us. Bit patterns have no
+     * such freedom. Two finite doubles that compare equal have identical bits,
+     * and both parity suites already assert the engines read numerically equal
+     * values, so agreement here follows from a property that is already tested.
+     * `-0.0` is the one exception to that and is normalised; non-finite values
+     * cannot occur in a deck and are mapped to a marker rather than trusted.
+     *
+     * **Strings are length-prefixed**, so there is no escaping convention for
+     * three languages to agree on.
+     *
+     * **An empty array and an empty map collapse to ONE marker.** PHP cannot
+     * tell them apart — `[]` is both — while Python and JS can, so a table row
+     * with no cells is `[]` here and `{}` there. Both parity suites already
+     * normalise the two together, which is the estate deciding that distinction
+     * is not meaningful; a digest depending on it would depend on something
+     * already ruled meaningless.
+     *
+     * Keys are sorted rather than taken in insertion order, and by BYTE value:
+     * PHP's `SORT_STRING` and Python's `sorted()` are byte order for UTF-8, and
+     * JS's default sort matches for everything below U+10000. Every key a read
+     * deck contains is machine-generated ASCII, which `ReaderIsPureTest` checks
+     * rather than assumes.
+     */
+    private function canonicalize(mixed $value, HashContext $ctx): void
+    {
+        if ($value === null) {
+            hash_update($ctx, '~');
+
+            return;
+        }
+        if (is_bool($value)) {
+            hash_update($ctx, $value ? 'T' : 'F');
+
+            return;
+        }
+        if (is_int($value) || is_float($value)) {
+            $number = (float) $value;
+            if (!is_finite($number)) {
+                hash_update($ctx, '?');
+
+                return;
+            }
+            if ($number == 0.0) {
+                // -0.0 and 0.0 are equal but not bit-equal, and either can be
+                // reached. Collapse to +0.0 so the engines cannot disagree.
+                $number = 0.0;
+            }
+            hash_update($ctx, '#');
+            hash_update($ctx, pack('E', $number));
+
+            return;
+        }
+        if (is_string($value)) {
+            hash_update($ctx, 's' . strlen($value) . ':');
+            hash_update($ctx, $value);
+
+            return;
+        }
+        if (is_array($value)) {
+            if ($value === []) {
+                hash_update($ctx, 'e');
+
+                return;
+            }
+            if (array_is_list($value)) {
+                hash_update($ctx, '[');
+                foreach ($value as $item) {
+                    $this->canonicalize($item, $ctx);
+                }
+                hash_update($ctx, ']');
+
+                return;
+            }
+            $keys = array_map('strval', array_keys($value));
+            sort($keys, SORT_STRING);
+            hash_update($ctx, '{');
+            foreach ($keys as $key) {
+                $this->canonicalize($key, $ctx);
+                $this->canonicalize($value[$key], $ctx);
+            }
+            hash_update($ctx, '}');
+
+            return;
+        }
+
+        // Unreachable for a deck, which is arrays and scalars all the way down.
+        hash_update($ctx, '?');
     }
 
     /**

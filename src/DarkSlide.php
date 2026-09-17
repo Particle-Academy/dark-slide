@@ -17,7 +17,7 @@ use RuntimeException;
  */
 final class DarkSlide
 {
-    public const VERSION = '0.10.2';
+    public const VERSION = '0.10.3';
 
     /**
      * @param  string|null  $tempDir  Optional override for the temp directory used while
