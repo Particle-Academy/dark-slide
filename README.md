@@ -128,9 +128,17 @@ be stored and diffed: two reads of unchanged bytes diff to nothing.
 
 The deck `id` is `imported-<crc32 of the file>`, and an element whose
 `<p:cNvPr>` carries no `name` to borrow one from gets `imported-<slide>-<nth>`
-from its position in the file. Before 0.10.1 the first came from `time()` and
-the second from `random_int()`, so a consumer diffing two reads of an unchanged
-file saw the whole deck replaced.
+from its position in the file. The CRC-32 is taken over every entry EXCEPT `docProps/core.xml`, which is the
+one part of a package that is about the save rather than about the deck — it
+carries the write-time `<dcterms:modified>` stamp. Saving a deck that changed
+nothing therefore yields the same id.
+
+Before 0.10.1 the first came from `time()` and the second from `random_int()`, so a
+consumer diffing two reads of an unchanged file saw the whole deck replaced.
+0.10.1 hashed the whole package instead, which moved that clock read to write
+time and made it worse — the id then changed on every save. Note that excluding
+that part whole means a deck's `<dc:title>` is outside the id, so **renaming a
+deck does not change its id**; the returned `title` still changes.
 
 ### What's new in v0.5
 

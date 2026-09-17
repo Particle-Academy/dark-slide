@@ -2,6 +2,73 @@
 
 ## [Unreleased]
 
+## v0.10.2 — 2026-09-16
+
+**A fix to a fix: 0.10.1 moved this defect rather than removing it.** That release
+made the deck id CRC-32 of the whole package — and the package embeds a
+write-time stamp in `docProps/core.xml`, so the clock read moved out of the
+reader and into the writer. Two reads of one buffer agreed, which is why every
+test passed, but a deck saved and re-read got a **different id every single
+time** instead of one time in five.
+
+That is strictly worse than what it replaced: an intermittent flake became a
+deterministic break. It took out **pptx version history in a consumer's shipped
+product** — a feature, not a format unit test — because every version in the
+chain was serialised at a different moment.
+
+The id is now derived from the package's entries **excluding
+`docProps/core.xml`**. Measured, not guessed: of a 43-entry package written
+either side of a second boundary, that is the only entry that differs. Saving a
+deck that changed nothing now yields the same id. Everything else about the id
+is unchanged — CRC-32, same algorithm in all three engines, same cross-engine
+agreement.
+
+All three engines ship it together: `@particle-academy/dark-slide` 0.8.2 and
+`fancy-dark-slide` 0.3.2.
+
+### Changed
+
+- **A deck's `<dc:title>` is outside the id, so renaming a deck does not change
+  it.** `<dc:title>` shares `docProps/core.xml` with the save timestamp, and the
+  exclusion is the whole part. The returned `title` still changes, so a differ
+  still sees a rename; only the id holds still. Narrowing the exclusion to the
+  two `<dcterms:*>` elements would change this, at the cost of regexing XML
+  inside the digest path in three engines — measured as unnecessary and
+  deliberately not done. Pinned by a test so it stays a decision.
+
+- **If you PERSISTED diffs, this is a data-format change.** Read this only if
+  you store diffs as rows; if you diff transiently, or do not diff at all, there
+  is nothing to do.
+
+  Ordinary edits emit targeted ops, which carry no deck id and are unaffected.
+  But **a diff taken while two ids had diverged emits a whole-deck `replace`,
+  and that payload carries the id.** Those rows are already written and we
+  cannot rewrite them. After this fix, replaying one restores a deck bearing an
+  old-scheme id, so the next diff against a freshly-read deck sees a mismatch
+  and emits another full replace.
+
+  **It is not corruption.** The op carries everything it needs, so a restore
+  still returns the correct bytes — this degrades **storage**, not correctness.
+  It is also self-limiting: only diffs captured while the bug was live carry an
+  id, so the window bounds itself, and history written before or after stays
+  compact.
+
+  **What to do:** nothing is a legitimate choice — you keep paying full price
+  for that window and nothing breaks. If you would rather reclaim it, re-baseline
+  the affected chains (re-read, re-diff) and compactness returns. There is no
+  migration script and there will not be one: those rows live in your store, in
+  your shape, and anything generic we shipped would be guessing at both.
+
+### Fixed
+
+- **`read()` is a pure function of its bytes, including across a save.**
+  Previously the id was CRC-32 of the whole package, so it followed
+  `gmdate()` at write time. ``tests/Unit/ReaderIsPureTest.php`` covers it
+  with the case the earlier tests all missed: a deck serialised, read,
+  re-serialised a second later and re-read must come back identical. Every test
+  in that file had read ONE buffer twice, which is exactly the blind spot a
+  defect one serialisation away sits in.
+
 ## v0.10.1 — 2026-09-16
 
 **`read()` is a pure function of its bytes again.** Reading the same `.pptx`
