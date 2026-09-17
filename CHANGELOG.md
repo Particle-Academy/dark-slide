@@ -33,7 +33,7 @@ change.
   the entry is the newest one. Packagist syncs from the tag and never reads the
   workflow file, so nothing about how a release reaches Composer changes.
 
-  **What you must do:** nothing. Only a script that looks runs up by the old
+  **What you must do:** nothing. Only a script that looks up runs by the old
   file (`gh run list --workflow=release-gate.yml`) needs `publish.yml` instead.
 
 ### Fixed
