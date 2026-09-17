@@ -14,8 +14,22 @@ namespace DarkSlide;
  * then the result is **verified** by replaying it through {@see Reducer}. If the
  * granular ops don't reproduce `$b` exactly (the hard cases — e.g. a removed
  * element field, an indistinguishable reorder), it falls back to a single
- * `deck.replace`. Either way the round-trip property holds:
- * `Reducer::applyAll($a, Differ::diff($a, $b)) == $b`.
+ * `deck.replace`. Either way the round-trip property holds over deck CONTENT:
+ * `Reducer::applyAll($a, Differ::diff($a, $b))` equals `$b` in everything except
+ * the top-level `id`.
+ *
+ * **The deck `id` is excluded, and that exclusion is the contract.** Since 0.10.0
+ * the id is a digest of the deck's own content, so two reads either side of any
+ * edit differ in it *by construction* — that is what "derived from content"
+ * means. An id must be equal across serialisations OR stable across edits; no
+ * derivation gives both. Comparing it here made every single edit fail
+ * verification and collapse to a whole-deck `deck.replace` (0.10.3), which is
+ * the regression this exclusion fixes.
+ *
+ * So no op carries the id, and a granular result keeps `$a`'s. That value is
+ * deliberately stale: an id describes the bytes a read came from, and only
+ * {@see \DarkSlide\Reader\PptxReader} may mint one. Re-read to obtain it.
+ * (`deck.replace` carries `$b` whole and therefore does carry `$b`'s id.)
  */
 final class Differ
 {
@@ -32,11 +46,29 @@ final class Differ
         $after = Reducer::applyAll($a, $ops);
         $after = self::fixOrder($after, $b, $ops);
 
-        if (self::canon(Reducer::applyAll($a, $ops)) !== self::canon($b)) {
+        // The id is derived from content and is never reconciled — see the class
+        // docblock. Compare the content the ops are actually responsible for.
+        if (self::canonContent(Reducer::applyAll($a, $ops)) !== self::canonContent($b)) {
             return [['op' => 'deck.replace', 'deck' => $b]];
         }
 
         return $ops;
+    }
+
+    /**
+     * Canonical form of a whole deck with the derived `id` dropped.
+     *
+     * Only whole-deck comparison uses this. The slide and element ids are NOT
+     * derived — they are the identity the granular ops are keyed on — so they
+     * stay in.
+     *
+     * @param  array<string,mixed>  $deck
+     */
+    private static function canonContent(array $deck): string
+    {
+        unset($deck['id']);
+
+        return self::canon($deck);
     }
 
     /**

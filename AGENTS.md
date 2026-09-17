@@ -64,6 +64,21 @@ both run THIS package as a subprocess and compare every part. So:
   digest of bytes identifies a SERIALISATION, and no exclusion list makes two
   serialisations of one deck byte-equal.
 
+  **And the id is therefore NOT something a differ reconciles.** An id can be
+  *equal across serialisations* or *stable across edits*; no derivation gives
+  both, and a content digest is the first by construction. `Differ::diff()`
+  excludes the top-level `id` from its whole-deck verification, no op carries it,
+  and a granular result keeps the SOURCE deck's id — stale on purpose, because
+  only a read may mint one. Comparing it there made every edit fail verification
+  and fall back to a whole-deck `deck.replace` (v0.10.3, caught by a consumer).
+  Slide and element ids are not derived and stay in every comparison: they are
+  the identity the granular ops are keyed on.
+
+  The suite could not see it because every dataset in the round-trip test pinned
+  one id — it varied titles, themes, elements and slides, and never the one field
+  that moves on every real edit. `Differ`, `Reducer` and `DeckOpSchema` are
+  **PHP-only**; the Node and Python engines have no twin to port this to.
+
   **The canonical encoding is a cross-engine contract, not an implementation
   detail.** Three engines must digest one structure to one value, so the encoding
   is written out in full in each reader and must be changed in all three at once.

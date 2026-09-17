@@ -2,6 +2,56 @@
 
 ## [Unreleased]
 
+## v0.10.4 — 2026-09-16
+
+### Fixed
+
+**`Differ::diff()` no longer collapses every edit to a whole-deck
+`deck.replace`.** v0.10.3 fixed the id and broke the differ; if you are on it,
+take this one.
+
+The two are the same fact seen from opposite ends. From v0.10.0 the deck `id` is
+a digest of the deck's **content**, so two reads either side of *any* edit differ
+in it by construction — that is what "derived from content" means. `diff()`
+verified its granular ops by replaying them and comparing the whole deck, id
+included, so the comparison could never match and the fallback fired every time.
+
+Measured across a real write → read → edit → write → read cycle:
+
+| | v0.10.0 | v0.10.3 | v0.10.4 |
+|---|---|---|---|
+| headline edit | `element.update` | **`deck.replace`** | `element.update` |
+| rename | `deck.setTitle` | **`deck.replace`** | `deck.setTitle` |
+
+Reported by a consumer who measured it; the op stream had silently become whole
+decks while every suite stayed green.
+
+**The rule this settles.** An id can be *equal across serialisations* or *stable
+across edits*. No derivation gives both, so the id is not content a differ
+reconciles — it is metadata about a read. It is now excluded from the whole-deck
+verification, no op carries it, and only `Reader\PptxReader` mints one.
+
+Slide and element ids are **unaffected**: those are not derived, they are the
+identity the granular ops are keyed on, and they stay in every comparison.
+
+### Changed
+
+- **The round-trip property is now stated over content.**
+  `Reducer::applyAll($a, Differ::diff($a, $b))` equals `$b` in everything except
+  the top-level `id`. After a granular diff the result keeps `$a`'s id, which is
+  deliberately stale — an id describes the bytes a read came from, so re-read to
+  obtain the new one. (`deck.replace` carries `$b` whole and so does carry `$b`'s
+  id.) **What to do:** nothing, unless you compared deck ids to decide whether
+  content changed — a content digest cannot answer that across an edit, and
+  could not in v0.10.3 either.
+
+### Added
+
+- Differ cases that vary the derived id. Every dataset in the existing
+  round-trip suite pinned `id => 'd1'`, so the suite could not see this: it
+  varied titles, themes, elements and slides, never the one field that moves on
+  every real edit. The new cases fail against v0.10.3.
+
 ## v0.10.3 — 2026-09-16
 
 **The third attempt at one defect, and the one that changes its basis.** The

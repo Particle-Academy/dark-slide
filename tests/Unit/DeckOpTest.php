@@ -173,3 +173,95 @@ function normalizeDeck(mixed $v): mixed
 
     return $v;
 }
+
+/*
+|--------------------------------------------------------------------------
+| The deck id is DERIVED, so the differ must not try to reconcile it
+|--------------------------------------------------------------------------
+|
+| Every dataset in the round-trip suite above pins `id => 'd1'`, so none of
+| them could see this: from 0.10.0 the id is a digest of the deck's CONTENT,
+| which means two reads either side of ANY edit differ in it by construction.
+| The whole-deck verification in Differ::diff compared the id along with
+| everything else, so it never matched and every edit fell back to a single
+| `deck.replace` — reported by a consumer against 0.10.3.
+|
+| A content digest can be equal across serialisations OR stable across edits,
+| never both. So the id is not content the differ reconciles; it is metadata
+| about a read, re-derived by read() from whatever bytes exist afterwards.
+*/
+
+/** Two reads either side of an edit: same content lineage, different derived id. */
+function deckReadAs(string $id, ?callable $edit = null): array
+{
+    $d = deckFixture();
+    $d['id'] = $id;
+
+    return $edit ? $edit($d) : $d;
+}
+
+it('emits granular ops when the derived deck id differs', function (string $label, callable $edit, string $expectedOp) {
+    $a = deckReadAs('content-digest-aaaa');
+    $b = deckReadAs('content-digest-bbbb', $edit);
+
+    $ops = Differ::diff($a, $b);
+
+    expect($ops)->toHaveCount(1)
+        ->and($ops[0]['op'])->toBe($expectedOp);
+})->with([
+    ['headline edit', function (array $d) {
+        $d['slides'][0]['elements'][0]['content'] = 'Goodbye';
+
+        return $d;
+    }, 'element.update'],
+    ['rename', function (array $d) {
+        $d['title'] = 'Annual';
+
+        return $d;
+    }, 'deck.setTitle'],
+    ['element moved', function (array $d) {
+        $d['slides'][0]['elements'][0]['x'] = 0.42;
+
+        return $d;
+    }, 'element.update'],
+]);
+
+it('round-trips content across a differing derived id, and leaves the id to read()', function () {
+    $a = deckReadAs('content-digest-aaaa');
+    $b = deckReadAs('content-digest-bbbb', function (array $d) {
+        $d['title'] = 'Annual';
+        $d['slides'][0]['elements'][0]['content'] = 'Goodbye';
+
+        return $d;
+    });
+
+    $result = Reducer::applyAll($a, Differ::diff($a, $b));
+
+    // Content reconciles...
+    expect(normalizeDeck(array_diff_key($result, ['id' => 1])))
+        ->toEqual(normalizeDeck(array_diff_key($b, ['id' => 1])));
+
+    // ...and the id does NOT travel on a granular op. It still reads as $a's,
+    // which is stale on purpose: nothing but a read may mint one.
+    expect($result['id'])->toBe('content-digest-aaaa');
+});
+
+it('still falls back to deck.replace when content genuinely cannot be reconciled', function () {
+    // `element.update` carries a PATCH, which merges — it cannot REMOVE a key.
+    // So dropping a field is the hard case the fallback exists for, and it must
+    // stay reachable now that the id no longer forces it on every edit.
+    $a = deckReadAs('content-digest-aaaa');
+    $b = deckReadAs('content-digest-bbbb', function (array $d) {
+        unset($d['slides'][0]['elements'][0]['content']);
+
+        return $d;
+    });
+
+    $ops = Differ::diff($a, $b);
+
+    expect($ops)->toHaveCount(1)
+        ->and($ops[0]['op'])->toBe('deck.replace');
+
+    // A replace carries $b whole, id included — it is $b, not a reconciliation of it.
+    expect(normalizeDeck(Reducer::applyAll($a, $ops)))->toEqual(normalizeDeck($b));
+});
