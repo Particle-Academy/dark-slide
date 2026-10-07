@@ -10,11 +10,19 @@ namespace DarkSlide\Helpers;
  * OOXML chart parts.
  *
  * The translator is deliberately forgiving about the many shapes ECharts
- * accepts: categories may live on `xAxis.data`, `xAxis[0].data`, or
- * `categories`; series data points may be bare numbers, `{value}`
- * objects, or `{name,value}` pairs (pie). Anything it cannot understand
- * yields `null`, which the writer treats as a cue to fall back to an
- * image or a titled placeholder rather than crash.
+ * accepts: categories may live on `xAxis.data` or `xAxis[0].data`; series data
+ * points may be bare numbers, `{value}` objects, or `{name,value}` pairs (pie).
+ * Anything it cannot understand yields `null`, which the writer treats as a cue
+ * to fall back to an image or a titled placeholder rather than crash.
+ *
+ * `categories` is NOT a third place to put them here, whatever this docblock used
+ * to say. `extractCategories()` seeds its candidate list with `[]`, which is
+ * already an array, so the `categories` fallback fires only when an `xAxis` is
+ * present WITHOUT `data`. The Node engine seeds `null` and therefore honours
+ * `categories` on its own -- a genuine three-way split, measured 2026-10-07 and
+ * invisible until then because the reference deck carries no chart, so byte
+ * parity has never exercised this file. Pinned by ChartOptionShapeTest; which way
+ * to resolve it changes existing decks and is the owner's call.
  *
  * Pure data, no runtime dependencies.
  *

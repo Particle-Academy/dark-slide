@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace DarkSlide\Schema;
 
+use DarkSlide\Helpers\ChartTranslator;
 use DarkSlide\Table\TableResolver;
 
 /**
@@ -162,6 +163,9 @@ final class Validator
                         $errors[] = $this->err("{$path}/code", 'string', $this->typeOf($element['code'] ?? null), $element['code'] ?? null, 'Code element must have a `code` string.');
                     }
                     break;
+                case 'chart':
+                    $errors = array_merge($errors, $this->validateChartOption($element, $path));
+                    break;
                 case 'table':
                     $errors = array_merge($errors, $this->validateTableRows($element, $path));
                     break;
@@ -180,6 +184,39 @@ final class Validator
         return $errors;
     }
 
+    /**
+     * A chart element with no `option` object at all.
+     *
+     * Deliberately NARROW. An option this writer cannot translate is not an
+     * error: it falls back to a pre-rendered `image` / `src` data URI and then to
+     * a titled placeholder, which is a supported, tested behaviour an author may
+     * be choosing on purpose. `Agent::write()` throws on any error this returns,
+     * so flagging the untranslatable case would turn that documented fallback into
+     * a hard failure -- which is exactly what happened when it was first written
+     * here, and what V04FeaturesTest caught.
+     *
+     * The schema is where the rest of this belongs: it describes the translatable
+     * subset and says what an option outside it becomes, so an author can tell a
+     * placeholder from a bug. See Schema::chartOptionJsonSchema().
+     *
+     * @param  array<string, mixed>  $element
+     * @return list<array{path: string, expected: string, got: string, value: mixed, hint: string}>
+     */
+    private function validateChartOption(array $element, string $path): array
+    {
+        $option = $element['option'] ?? null;
+        if (is_array($option)) {
+            return [];
+        }
+
+        return [$this->err(
+            "{$path}/option",
+            'object (an ECharts option)',
+            $this->typeOf($option),
+            $option,
+            'A chart element must have an `option` object. Give `series` a list of points with a supported type ('.implode(', ', ChartTranslator::SUPPORTED_TYPES).'), or supply a pre-rendered chart as a data: URI in `image`.',
+        )];
+    }
     /**
      * A table row that shares no key with any column.
      *

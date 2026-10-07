@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace DarkSlide\Schema;
 
+use DarkSlide\Helpers\ChartTranslator;
+
 /**
  * Schema constants describing the Deck shape DarkSlide reads + writes.
  *
@@ -261,6 +263,66 @@ final class Schema
     }
 
     /**
+     * A chart ELEMENT's `option`, with the translatable surface published.
+     *
+     * This said `['type' => 'object']` and nothing more until 0.11.0, and it ends
+     * in the same silent failure as a mis-shaped table row. The React renderer
+     * hands `option` straight to ECharts, which draws an EMPTY CANVAS for a shape
+     * it does not recognise and raises nothing. This writer hands it to
+     * ChartTranslator, which returns null for anything it cannot read, leaving a
+     * titled placeholder where the chart should be. Full size, no data, no error,
+     * either way.
+     *
+     * Described here is the subset the WRITER can turn into a native OOXML chart.
+     * Any other ECharts option is still valid in the browser -- the field is an
+     * ECharts option, not a format of ours -- so `additionalProperties` stays open
+     * and the fallback is stated rather than the extra keys being forbidden.
+     *
+     * `categories` is deliberately absent. The translator reads it only when an
+     * `xAxis` is present WITHOUT `data`, while the Node engine honours it on its
+     * own, so the three engines do not agree on it; `xAxis.data` is the portable
+     * form and is what is published. Asserted by ChartOptionShapeTest.
+     *
+     * @return array<string, mixed>
+     */
+    private static function chartOptionJsonSchema(): array
+    {
+        return [
+            'type' => 'object',
+            'description' => 'An Apache ECharts option object. The React renderer passes it to ECharts verbatim, so any valid ECharts option works on screen. This writer renders a NATIVE pptx chart from the subset described here -- series of type '.implode(' / ', ChartTranslator::SUPPORTED_TYPES).' -- and anything it cannot read falls back, in order, to a pre-rendered chart image taken from the element\'s `image` or `src` (a data: URI) and then to a titled PLACEHOLDER box. The placeholder is the same size as the chart and carries no data, so an option this writer cannot read looks like a rendering bug rather than an authoring one: prefer the shape below, or supply `image`.',
+            'properties' => [
+                'series' => [
+                    'type' => 'array',
+                    'description' => 'REQUIRED for a native chart: the data to plot. One series object, or a list of them. An option with no series renders an empty canvas in the browser and a placeholder in the file.',
+                    'items' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'type' => ['type' => 'string', 'enum' => ChartTranslator::SUPPORTED_TYPES, 'description' => 'The chart kind, defaulting to bar when absent. A type outside this list -- radar, gauge, treemap, any other ECharts type -- renders in the browser but makes the WHOLE option untranslatable here, placeholder included: supply `image` as well if you need one.'],
+                            'name' => ['type' => 'string', 'description' => 'The series label, shown in the legend.'],
+                            'data' => ['type' => 'array', 'description' => 'The points. A bare number, or {"value": number}; for a pie, {"name": string, "value": number}, whose names become the category labels; for a scatter, {"value": [x, y]}. A point this writer cannot read makes the option untranslatable.'],
+                            'smooth' => ['type' => 'boolean', 'description' => 'Line series only: curve the line.'],
+                            'areaStyle' => ['type' => 'object', 'description' => 'Line series only: fill under the line. Its PRESENCE is what this writer reads -- the styling inside it is browser-only, so an empty object is enough.'],
+                        ],
+                    ],
+                ],
+                'xAxis' => [
+                    'type' => ['object', 'array'],
+                    'description' => 'Category labels come from `xAxis.data` (or `xAxis[0].data` when given as a list). Absent, the categories are numbered 1, 2, 3 ... -- which is the quiet way a chart ends up correct but unreadable. A pie takes its labels from the point names instead.',
+                    'properties' => [
+                        'data' => ['type' => 'array', 'description' => 'The category labels, in order, one per point in each series.'],
+                    ],
+                ],
+                'title' => [
+                    'type' => ['object', 'array'],
+                    'description' => 'The chart title, read from `title.text` (or `title[0].text` when given as a list). It is also what labels the placeholder box if the option cannot be translated, so it is worth setting even on a chart this writer cannot render.',
+                    'properties' => [
+                        'text' => ['type' => 'string', 'description' => 'The title text.'],
+                    ],
+                ],
+            ],
+        ];
+    }
+    /**
      * A table COLUMN, with the item shape published.
      *
      * This said `['type' => 'array']` and nothing more until 0.10.4. The fact
@@ -365,7 +427,7 @@ final class Schema
                 'codeTheme' => ['type' => 'string'],
                 'columns' => self::tableColumnsJsonSchema(),
                 'rows' => self::tableRowsJsonSchema(),
-                'option' => ['type' => 'object'],
+                'option' => self::chartOptionJsonSchema(),
                 'chartTheme' => ['type' => 'string'],
                 // Optional entrance build animation. When present the element
                 // participates in the slide's build sequence and the writer

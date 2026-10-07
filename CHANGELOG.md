@@ -2,6 +2,51 @@
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-07
+
+### Added
+
+- **The published schema now describes a chart `option`.** It exported
+  `['type' => 'object']` and nothing more, so a tool vocabulary generated from
+  `Agent::jsonSchema()` could not teach an author what a chart needs -- and the
+  failure at the end of that is silent in both directions: the React renderer hands
+  `option` to ECharts, which draws an EMPTY CANVAS for a shape it does not
+  recognise, and this writer hands it to `ChartTranslator`, which returns null for
+  anything it cannot read and leaves a titled PLACEHOLDER the same size as the
+  chart. Neither raises anything.
+
+  Described: `series` and its item shape (`type` with the four supported kinds,
+  `name`, `data` with all four accepted point forms, `smooth`, `areaStyle`),
+  `xAxis.data` for category labels, and `title.text`. And the part no author could
+  have known -- **what an option this writer cannot translate BECOMES**: the
+  element's `image` / `src` data URI if there is one, then a titled placeholder.
+  Asked for in the fancy-slides#14 thread.
+
+- **`Agent::validate()` flags a chart element with no `option` object at all**, in
+  the same place it already requires `content` on a text element and `src` on an
+  image.
+
+  **Deliberately narrow.** An option the translator cannot read is NOT flagged: the
+  placeholder is a supported, tested fallback, and `Agent::write()` throws on any
+  validator error, so flagging it would turn documented behaviour into a hard
+  failure. It did exactly that while this was being written, and `V04FeaturesTest`
+  caught it -- now pinned by a test of its own.
+
+### Fixed
+
+- **The class docblock claimed `categories` was a third place to put category
+  labels. It is not** -- `extractCategories()` seeds its candidate list with `[]`,
+  which is already an array, so that fallback fires only when an `xAxis` is present
+  WITHOUT `data`. A chart authored with a standalone `categories` silently gets
+  `1, 2, 3 ...` labels here.
+
+  **The Node engine honours it**, so this is a real three-way split on a silent
+  path, measured 2026-10-07 and invisible until now because the reference deck
+  carries no chart -- byte parity has never once exercised the translator. Pinned
+  by a test in each engine and recorded in `dark-slide-py/AGENTS.md`; which way to
+  resolve it changes existing decks and is the owner's call. The published schema
+  documents `xAxis.data`, which works everywhere, and omits `categories`.
+
 ## [0.11.0] - 2026-10-07
 
 ### Added
