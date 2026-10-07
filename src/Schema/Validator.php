@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace DarkSlide\Schema;
 
+use DarkSlide\Table\TableResolver;
+
 /**
  * Schema-shape validator. Catches malformed agent output before it reaches
  * the writer. Returns a structured error list (path + expected + got +
@@ -160,6 +162,9 @@ final class Validator
                         $errors[] = $this->err("{$path}/code", 'string', $this->typeOf($element['code'] ?? null), $element['code'] ?? null, 'Code element must have a `code` string.');
                     }
                     break;
+                case 'table':
+                    $errors = array_merge($errors, $this->validateTableRows($element, $path));
+                    break;
                 case 'kpiBand':
                 case 'metadataGrid':
                     // An items-less composite is not an error the writer can
@@ -175,6 +180,61 @@ final class Validator
         return $errors;
     }
 
+    /**
+     * A table row that shares no key with any column.
+     *
+     * Every cell resolves to nothing and the table still draws at FULL SIZE,
+     * because its geometry comes from the columns and the row count. The result is
+     * a correctly-shaped grid with every cell blank and nothing raised anywhere --
+     * the same class of wrong as the items-less composite above, and it reached a
+     * customer as a table whose rows were empty (fancy-slides#14).
+     *
+     * Three shapes are NOT this and must not be flagged: a POSITIONAL row (a list,
+     * read in column order), a partially-filled row (a missing cell is simply
+     * empty), and a row carrying only row-level style. Only an object row whose
+     * cell keys match NOTHING is unrecoverable -- in practice a mis-cased or
+     * renamed key, which is why the hint names the keys that would work.
+     *
+     * @param  array<string, mixed>  $element
+     * @return list<array{path: string, expected: string, got: string, value: mixed, hint: string}>
+     */
+    private function validateTableRows(array $element, string $path): array
+    {
+        $rows = $element['rows'] ?? null;
+        $rawColumns = $element['columns'] ?? null;
+        if (! is_array($rows) || ! is_array($rawColumns) || $rawColumns === []) {
+            return [];
+        }
+
+        $keys = array_column(TableResolver::normalizeColumns($rawColumns), 'key');
+        $ignored = array_merge(TableResolver::STYLE_KEYS, TableResolver::ROW_KEYS);
+        $errors = [];
+
+        foreach (array_values($rows) as $i => $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $inner = is_array($row['cells'] ?? null) ? $row['cells'] : $row;
+            if (array_is_list($inner)) {
+                continue; // positional, read in column order
+            }
+
+            $claimed = array_diff(array_keys($inner), $ignored);
+            if ($claimed === [] || array_intersect($claimed, $keys) !== []) {
+                continue;
+            }
+
+            $errors[] = $this->err(
+                "{$path}/rows/{$i}",
+                'at least one key from: '.implode(' / ', $keys),
+                'keys: '.implode(' / ', $claimed),
+                $row,
+                'No column reads anything from this row, so every cell would render empty at full table size. Key each cell by a column key ('.implode(', ', $keys).'), or give the row as a positional list in column order.',
+            );
+        }
+
+        return $errors;
+    }
     /**
      * @param  mixed  $value
      * @return array{path: string, expected: string, got: string, value: mixed, hint: string}

@@ -261,6 +261,71 @@ final class Schema
     }
 
     /**
+     * A table COLUMN, with the item shape published.
+     *
+     * This said `['type' => 'array']` and nothing more until 0.10.4. The fact
+     * that a column key is what every row is keyed BY was readable only from the
+     * resolver source, so a tool vocabulary generated from this schema could not
+     * carry it. See tableRowsJsonSchema().
+     *
+     * @return array<string, mixed>
+     */
+    private static function tableColumnsJsonSchema(): array
+    {
+        return [
+            'type' => 'array',
+            'description' => 'The table columns, in display order. A column is an object, and `key` is required.',
+            'items' => [
+                'type' => 'object',
+                'required' => ['key'],
+                'properties' => [
+                    'key' => ['type' => 'string', 'description' => 'The key this column reads from each row object: `rows: [{"<key>": "value"}]`. Never displayed -- `label` is what the header shows.'],
+                    'label' => ['type' => 'string', 'description' => 'The header text for this column. Falls back to `key` when absent.'],
+                    'width' => ['type' => 'number', 'description' => 'Column width. Every declared width <= 1 makes them FRACTIONS of the table and columns without one share the remainder; any declared width > 1 makes them WEIGHTS and columns without one weigh 1. No width anywhere is an equal split.'],
+                    'align' => ['type' => 'string', 'enum' => ['left', 'center', 'right', 'justify'], 'description' => 'Horizontal alignment for the whole column. A row or a cell overrides it.'],
+                    'anchor' => ['type' => 'string', 'enum' => ['top', 'middle', 'bottom'], 'description' => 'Vertical alignment for the whole column. A row or a cell overrides it.'],
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * A table ROW, with both accepted item shapes published.
+     *
+     * Publishing only `['type' => 'array']` was the whole of fancy-slides#14. The
+     * canonical row is an object keyed by each column key; the natural guess from
+     * a bare column list is a positional row; and that guess failed SILENTLY --
+     * every cell empty, the grid still drawn at full size, because its geometry
+     * comes from the columns and the row COUNT. It reached a customer as a table
+     * whose rows were empty, and read as a renderer bug rather than a malformed
+     * deck.
+     *
+     * A positional row is now read in column order, so BOTH forms are described
+     * here. Describing only the canonical one would make the other read as
+     * invalid, which it is not.
+     *
+     * @return array<string, mixed>
+     */
+    private static function tableRowsJsonSchema(): array
+    {
+        return [
+            'type' => 'array',
+            'description' => 'The table body rows. The header row is generated from the column labels and is NOT listed here.',
+            'items' => [
+                'oneOf' => [
+                    [
+                        'type' => 'object',
+                        'description' => 'The canonical row: one entry per column `key` -- {"plan": "Starter", "price": "$49"}. A cell value is a scalar, or a cell spec object ({text, colSpan, rowSpan, fill, bold, align, ...}). A column with no entry renders as an empty cell. Row-level style keys (fill, color, bold, italic, underline, align, anchor, fontSize, letterSpacing, caps, fontFamily, padding, borders) and `height` style the whole row -- put the cell values under `cells` when a column key would collide with one of those.',
+                    ],
+                    [
+                        'type' => 'array',
+                        'description' => 'A positional row: the values in COLUMN ORDER, read as columns[i].key. ["Starter", "$49"] means exactly {"plan": "Starter", "price": "$49"} when the columns are [{"key": "plan"}, {"key": "price"}]. Values past the last column are ignored, and columns past the last value render empty. Prefer the keyed form: it survives a column reorder, and it is the only one that can also carry row-level style.',
+                    ],
+                ],
+            ],
+        ];
+    }
+    /**
      * @return array<string, mixed>
      */
     private static function elementJsonSchema(): array
@@ -298,8 +363,8 @@ final class Schema
                 'code' => ['type' => 'string'],
                 'language' => ['type' => 'string'],
                 'codeTheme' => ['type' => 'string'],
-                'columns' => ['type' => 'array'],
-                'rows' => ['type' => 'array'],
+                'columns' => self::tableColumnsJsonSchema(),
+                'rows' => self::tableRowsJsonSchema(),
                 'option' => ['type' => 'object'],
                 'chartTheme' => ['type' => 'string'],
                 // Optional entrance build animation. When present the element

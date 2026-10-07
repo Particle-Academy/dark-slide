@@ -2,6 +2,46 @@
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-07
+
+### Added
+
+- **The published schema now carries the ITEM shape of a table's `columns` and
+  `rows`.** It exported `columns: {type: array}, rows: {type: array}` and nothing
+  more, so a tool vocabulary generated from `Agent::jsonSchema()` -- which is the
+  point of publishing it -- could not teach an author that a column's `key` is what
+  every row is keyed BY. That fact was readable only from the resolver's source.
+
+  `columns.items` now describes `key`, `label`, `width`, `align` and `anchor`, with
+  the two width modes stated. `rows.items` describes both accepted forms. Reported
+  as fancy-slides#14.
+
+- **`Agent::validate()` flags a table row that matches no column.** Every cell
+  resolves to nothing and the table still draws at full size, which is the same
+  class of silent wrong as the items-less composite it sits beside. A positional
+  row, a partially-filled row and a row carrying only style are NOT flagged; the
+  hint names the keys that would have worked.
+
+### Changed
+
+- **A table row given as a LIST is now read in COLUMN ORDER**, so
+  `rows: [["Starter", "$49"]]` means `[{"plan": "Starter", "price": "$49"}]` given
+  columns `[{key: "plan"}, {key: "price"}]`. It previously resolved every cell to
+  nothing.
+
+  **Nothing a consumer did stops working**: a keyed row is unchanged, and a list
+  row produced an empty row of cells before. Surplus values past the last column
+  are dropped; columns past the last value stay empty, exactly as a missing key
+  does.
+
+  The three engines disagreed on this input and nothing noticed: this one kept the
+  row and emptied it, while Node and Python dropped the row from the deck ENTIRELY.
+  One deck, a different row count per engine. Now pinned cross-language by
+  `fancy-conformance` 0.34.0 rows 0029-0033.
+
+- `TableResolver::STYLE_KEYS` and `ROW_KEYS` are public, so the validator reads the
+  same list the resolver does rather than a second copy of it.
+
 ### Added
 
 - **A threshold-free guard on the differ: *does the diff mention the part that

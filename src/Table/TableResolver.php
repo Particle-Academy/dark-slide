@@ -40,6 +40,21 @@ use DarkSlide\Helpers\DesignUnits;
 final class TableResolver
 {
     /** Design pixels, like an authored `fontSize`: 10.5pt on the default 1920 canvas. */
+    /**
+     * The style keys a layer may contribute, in precedence-neutral order.
+     *
+     * Public because a row that carries ONLY these is a styled row with no cell
+     * values rather than a row keyed wrongly, and the validator has to tell those
+     * apart. A second copy of this list over there would be a list that drifts.
+     *
+     * @var list<string>
+     */
+    public const STYLE_KEYS = ['fill', 'color', 'bold', 'italic', 'underline', 'align', 'anchor',
+        'fontSize', 'letterSpacing', 'caps', 'fontFamily', 'padding', 'borders'];
+
+    /** Row-level keys that are never cell values. @var list<string> */
+    public const ROW_KEYS = ['cells', 'height'];
+
     public const DEFAULT_FONT_SIZE = 28;
 
     public const DEFAULT_BODY_COLOR = '#0F172A';
@@ -248,6 +263,44 @@ final class TableResolver
      * @param  array<int|string, mixed>  $rawRows
      * @return list<array{source: array<string, mixed>, cells: list<array<string, mixed>>}>
      */
+    /**
+     * One row as cell values keyed by column key.
+     *
+     * A row is canonically an object keyed by each column key. A row given as a
+     * LIST is POSITIONAL: its values are read in column order. That form used to
+     * resolve to a row of empty cells here -- and to a row DROPPED ENTIRELY in the
+     * Node and Python engines, so three engines held to byte-identical output
+     * disagreed on the row count of the same deck, with nothing raised anywhere.
+     * Reported as fancy-slides#14.
+     *
+     * The ambiguity is only apparent. A list has keys 0..n-1, so the positional
+     * reading differs from the keyed one only when the COLUMNS are themselves
+     * keyed "0", "1", ... out of order -- and the keyed form is what expresses
+     * that. Surplus values have nowhere to go and are dropped; columns past the
+     * last value resolve to empty, exactly as a missing key does.
+     *
+     * @param  array<string, mixed>  $row
+     * @param  list<array<string, mixed>>  $columns
+     * @return array<array-key, mixed>
+     */
+    private static function cellMap(array $row, array $columns): array
+    {
+        $inner = is_array($row['cells'] ?? null) ? $row['cells'] : $row;
+
+        if (! array_is_list($inner)) {
+            return $inner;
+        }
+
+        $map = [];
+        foreach (array_values($inner) as $i => $value) {
+            if (! isset($columns[$i])) {
+                break;
+            }
+            $map[$columns[$i]['key']] = $value;
+        }
+
+        return $map;
+    }
     private static function buildGrid(array $columns, array $rawRows, bool $hasHeader): array
     {
         $n = count($columns);
@@ -265,7 +318,7 @@ final class TableResolver
             if (! is_array($row)) {
                 continue;
             }
-            $cellMap = is_array($row['cells'] ?? null) ? $row['cells'] : $row;
+            $cellMap = self::cellMap($row, $columns);
             $cells = [];
             foreach ($columns as $col) {
                 $value = $cellMap[$col['key']] ?? null;
@@ -562,11 +615,8 @@ final class TableResolver
      */
     private static function styleKeys(array $source): array
     {
-        $keys = ['fill', 'color', 'bold', 'italic', 'underline', 'align', 'anchor',
-            'fontSize', 'letterSpacing', 'caps', 'fontFamily', 'padding', 'borders'];
-
         $out = [];
-        foreach ($keys as $k) {
+        foreach (self::STYLE_KEYS as $k) {
             if (array_key_exists($k, $source) && $source[$k] !== null) {
                 $out[$k] = $source[$k];
             }
