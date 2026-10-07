@@ -30,7 +30,18 @@ namespace DarkSlide\Helpers;
  */
 final class ChartTranslator
 {
-    /** ECharts series types we can render as native OOXML charts. */
+    /**
+     * ECharts series types we can render as native OOXML charts.
+     *
+     * WIDENING IS SAFE, NARROWING IS BREAKING, and not only for our own output: the
+     * list is published in the deck schema as `option.series.items.type`'s enum, and a
+     * consumer generating their writer vocabulary from that schema guards it — their
+     * craft guidance tells authoring agents to stay inside these four, because a type
+     * outside them makes the WHOLE option untranslatable and leaves a same-sized
+     * placeholder box with a file still written and nothing raised. Drop one and their
+     * test goes red before a writer finds out, which is the arrangement working; add
+     * one and nothing breaks anywhere.
+     */
     public const SUPPORTED_TYPES = ['bar', 'line', 'pie', 'scatter'];
 
     /**
