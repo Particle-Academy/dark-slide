@@ -278,10 +278,12 @@ final class Schema
      * ECharts option, not a format of ours -- so `additionalProperties` stays open
      * and the fallback is stated rather than the extra keys being forbidden.
      *
-     * `categories` is deliberately absent. The translator reads it only when an
-     * `xAxis` is present WITHOUT `data`, while the Node engine honours it on its
-     * own, so the three engines do not agree on it; `xAxis.data` is the portable
-     * form and is what is published. Asserted by ChartOptionShapeTest.
+     * `categories` is described as of 0.13.0. It was withheld while the three
+     * engines disagreed on it -- two ignored it, Node honoured it -- because a
+     * contract that is false somewhere should not be published. The owner ruled
+     * on 2026-10-07 that the two should match Node, so it is now true everywhere
+     * and says what it is: a shorthand THIS FAMILY reads, which ECharts itself
+     * does not, so `xAxis.data` remains the form both ends understand.
      *
      * @return array<string, mixed>
      */
@@ -311,6 +313,10 @@ final class Schema
                     'properties' => [
                         'data' => ['type' => 'array', 'description' => 'The category labels, in order, one per point in each series.'],
                     ],
+                ],
+                'categories' => [
+                    'type' => 'array',
+                    'description' => 'A shorthand for the category labels, equivalent to `xAxis.data` and read only when that is absent. NOT an ECharts key -- ECharts itself ignores it, so a chart relying on it comes out labelled in a pptx export and numbered 1, 2, 3 ... in a browser renderer. `xAxis.data` is the form both ends read; prefer it.',
                 ],
                 'title' => [
                     'type' => ['object', 'array'],

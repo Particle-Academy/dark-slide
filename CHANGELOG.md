@@ -2,6 +2,42 @@
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-07
+
+### Changed
+
+- **`option.categories` is now honoured on its own**, as this file's docblock has
+  promised the whole time and as the Node engine has always done. It was read only
+  when an `xAxis` was present WITHOUT `data`, because the candidate list was seeded
+  `[]` -- already an array, so the fallback could not fire -- and a chart authored
+  with `categories` alone silently got `1, 2, 3 ...` labels.
+
+  **This changes rendered output**: a chart relying on `categories` gains its real
+  labels. Nothing else moves, and `xAxis.data` still wins where both are given.
+  Owner ruling, 2026-10-07. The matching change ships in the Node and Python
+  engines, which now agree with this one on all 14 probed option shapes.
+
+  The schema describes `categories` as of this release -- it was withheld while
+  the three disagreed, since a contract that is false somewhere should not be
+  published.
+
+### Added
+
+- **This engine now RUNS the shared `dark-slide/table-cell-model` conformance
+  suite** (`tests/Conformance/TableCellModelTest.php`), 33 rows green. The suite's
+  manifest has named three implementations since 0.7.0 and only Python actually
+  ran it -- a claim about three engines, checked on one, which reads as coverage.
+  Owner ruling, 2026-10-07.
+
+  Byte parity already compares every OOXML part of the nine-slide reference deck,
+  but that deck walks ONE path through the resolution chain per cell: a collapsed
+  precedence layer emits identical bytes for it and is wrong for every deck taking
+  another order. The harness is sabotage-tested -- a 0.1pt change to the default
+  padding turns 28 of 33 rows red.
+
+- `particle-academy/fancy-conformance` 0.34 as a dev dependency, pinned exactly,
+  like every other engine in the trio.
+
 ## [0.12.0] - 2026-10-07
 
 ### Added

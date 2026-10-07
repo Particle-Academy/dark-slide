@@ -15,14 +15,13 @@ namespace DarkSlide\Helpers;
  * Anything it cannot understand yields `null`, which the writer treats as a cue
  * to fall back to an image or a titled placeholder rather than crash.
  *
- * `categories` is NOT a third place to put them here, whatever this docblock used
- * to say. `extractCategories()` seeds its candidate list with `[]`, which is
- * already an array, so the `categories` fallback fires only when an `xAxis` is
- * present WITHOUT `data`. The Node engine seeds `null` and therefore honours
- * `categories` on its own -- a genuine three-way split, measured 2026-10-07 and
- * invisible until then because the reference deck carries no chart, so byte
- * parity has never exercised this file. Pinned by ChartOptionShapeTest; which way
- * to resolve it changes existing decks and is the owner's call.
+ * `categories` really is a third place to put them, as of 0.13.0. It was not
+ * before: `extractCategories()` seeded its candidate list with `[]`, which is
+ * already an array, so the fallback fired only when an `xAxis` was present
+ * WITHOUT `data` -- while the Node engine seeded `null` and honoured it. A
+ * three-way split on a path byte parity never reaches, since the reference deck
+ * carries no chart. Measured and ruled 2026-10-07: the two engines that ignored
+ * it now match Node, which is what this docblock had claimed all along.
  *
  * Pure data, no runtime dependencies.
  *
@@ -103,12 +102,21 @@ final class ChartTranslator
     }
 
     /**
+     * Category labels, from `xAxis.data`, `xAxis[0].data` or `categories`.
+     *
+     * The seed is `null` and NOT `[]`, which is the whole of the fix the owner
+     * ruled on 2026-10-07: `[]` is already an array, so the `categories` fallback
+     * below could only fire when an `xAxis` was present WITHOUT `data`, and a deck
+     * using `categories` alone silently got `1, 2, 3 ...` labels. The Node engine
+     * seeded `null` and honoured it, so the trio was split three ways on a path
+     * byte parity never reaches -- the reference deck carries no chart.
+     *
      * @param  array<string, mixed>  $option
      * @return list<string>
      */
     private static function extractCategories(array $option): array
     {
-        $candidates = [];
+        $candidates = null;
         $xAxis = $option['xAxis'] ?? null;
         if (is_array($xAxis)) {
             if (array_is_list($xAxis) && isset($xAxis[0]) && is_array($xAxis[0])) {

@@ -70,15 +70,7 @@ it('describes every option key the translator reads', function () {
 
     $described = cosOption()['properties'];
     foreach ($read as $key) {
-        // `categories` is deliberately NOT described: it is read only when an
-        // xAxis is present without `data`, and the Node engine honours it
-        // standalone while this one does not. Describing a key three engines
-        // disagree on would publish a contract that is false somewhere.
-        if ($key === 'categories') {
-            expect($described)->not->toHaveKey('categories');
 
-            continue;
-        }
         expect($described)->toHaveKey($key);
         expect($described[$key]['description'] ?? '')->not->toBe('');
     }
@@ -173,28 +165,27 @@ it('does not flag a chart it can render, or one carrying its own image', functio
     ])))->toBe([]);
 });
 
-it('pins the three-way split on `categories` with no xAxis', function () {
-    // Measured 2026-10-07. This engine IGNORES a standalone `categories` --
-    // extractCategories() seeds its candidates with [], which is already an
-    // array, so the fallback never fires -- while the Node engine honours it.
-    // Python matches this one. A chart authored that way gets real labels from
-    // one engine and 1, 2, 3 ... from the other two, silently.
-    //
-    // Pinned rather than fixed: resolving it changes the rendered output of
-    // existing decks, which is the owner's call. When it is made, this fails in
-    // whichever engine moves, which is exactly what should happen.
+it('honours a standalone `categories`, as all three engines now do', function () {
+    // Was a three-way split until 2026-10-07: this engine and Python seeded their
+    // candidate list with [], which is already an array, so the fallback never
+    // fired and a deck using `categories` alone got 1, 2, 3 ... labels, while Node
+    // seeded null and honoured it. Invisible to byte parity, which never reaches
+    // the translator -- the reference deck carries no chart. The owner ruled that
+    // the two should match Node, which is what the docblock had always claimed.
     $spec = ChartTranslator::translate([
         'categories' => ['Q1', 'Q2'],
         'series' => [['type' => 'bar', 'data' => [1, 2]]],
     ]);
 
-    expect($spec['categories'])->toBe([]);
+    expect($spec['categories'])->toBe(['Q1', 'Q2']);
 
-    // And the form that IS portable, published in the schema, does work.
-    $portable = ChartTranslator::translate([
+    // `xAxis.data` still wins where both are given: it is the ECharts key, and
+    // the only one the browser renderer reads.
+    $both = ChartTranslator::translate([
+        'categories' => ['ignored', 'also ignored'],
         'xAxis' => ['data' => ['Q1', 'Q2']],
         'series' => [['type' => 'bar', 'data' => [1, 2]]],
     ]);
 
-    expect($portable['categories'])->toBe(['Q1', 'Q2']);
+    expect($both['categories'])->toBe(['Q1', 'Q2']);
 });
