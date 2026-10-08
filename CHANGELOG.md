@@ -2,6 +2,38 @@
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-07
+
+### Added
+
+- **`metadata.created` / `metadata.modified` now set `docProps/core.xml`'s
+  timestamps** (dark-slide#10). `modified` falls back to `created`, and `created`
+  to `gmdate()`. Non-strings and the empty string are ignored rather than written,
+  because `0` in a W3CDTF field produces a document a reader can reject.
+
+### Fixed
+
+- **`toBytes()` is now a pure function of its deck when the deck says when it was
+  made.** It embedded `gmdate()` unconditionally, so two calls one second apart
+  produced different bytes. Nothing was wrong with the document; the problem is
+  what reads it — a content-addressed store or a byte-level diff saw a change in
+  a save that changed nothing.
+
+  **Nothing for a consumer to do.** With no `metadata.created` the clock is still
+  used and the bytes are what they always were. This only adds a way to pin it.
+
+  The sibling Python engine has honoured these two keys since its first release,
+  so the spelling is not new; what was missing was any way to reach it from PHP
+  or Node. A consumer writes ONE deck for three engines, so a second spelling
+  would have been the same defect one layer out.
+
+### Security
+
+- **A deck-supplied timestamp is XML-escaped.** The value used to come from
+  `gmdate()` and is consumer input now, so an unescaped one could close
+  `<dcterms:created>` early and rewrite the rest of `docProps/core.xml`. Not
+  reachable before this release, since there was no way to supply a value.
+
 ## [0.13.0] - 2026-10-07
 
 ### Changed

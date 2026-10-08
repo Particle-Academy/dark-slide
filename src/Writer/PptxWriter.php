@@ -368,21 +368,59 @@ final class PptxWriter
             . '</Relationships>';
     }
 
-    /** @param array<string, mixed> $deck */
+    /**
+     * `docProps/core.xml`.
+     *
+     * THE CLOCK IS A DEFAULT, NOT A FACT (dark-slide#10). This embedded
+     * `gmdate()` unconditionally, so two `toBytes()` calls on one deck a second
+     * apart produced different bytes -- a save that changed nothing reads as a
+     * change to a content-addressed store or a byte-level diff.
+     *
+     * `dcterms:created` / `dcterms:modified` are legitimately timestamps, so the
+     * clock stays as the default and `metadata.created` / `metadata.modified`
+     * override it. A caller wanting reproducible bytes supplies them; a caller
+     * that does not sees exactly the previous behaviour.
+     *
+     * The two keys, and `modified` falling back to `created` rather than to the
+     * default, are `dark-slide-py`'s rule rather than a new invention -- it has
+     * honoured them since its first release. A consumer writes ONE deck for three
+     * engines, so a second spelling would be this same defect one layer out.
+     *
+     * NOTE the values are escaped. They were generated here before and are
+     * consumer input now.
+     *
+     * @param array<string, mixed> $deck
+     */
     private function buildCoreProps(array $deck): string
     {
         $title = Xml::text((string) ($deck['title'] ?? 'Untitled'));
         $author = isset($deck['metadata']['author']) ? Xml::text((string) $deck['metadata']['author']) : 'Dark Slide';
-        $now = gmdate('Y-m-d\TH:i:s\Z');
+
+        $metadata = is_array($deck['metadata'] ?? null) ? $deck['metadata'] : [];
+        $createdAt = $this->timestampOr($metadata['created'] ?? null, gmdate('Y-m-d\TH:i:s\Z'));
+        $modifiedAt = $this->timestampOr($metadata['modified'] ?? null, $createdAt);
+
+        $created = Xml::text($createdAt);
+        $modified = Xml::text($modifiedAt);
 
         return Xml::declaration()
             . '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">'
             . "<dc:title>{$title}</dc:title>"
             . "<dc:creator>{$author}</dc:creator>"
             . "<cp:lastModifiedBy>{$author}</cp:lastModifiedBy>"
-            . "<dcterms:created xsi:type=\"dcterms:W3CDTF\">{$now}</dcterms:created>"
-            . "<dcterms:modified xsi:type=\"dcterms:W3CDTF\">{$now}</dcterms:modified>"
+            . "<dcterms:created xsi:type=\"dcterms:W3CDTF\">{$created}</dcterms:created>"
+            . "<dcterms:modified xsi:type=\"dcterms:W3CDTF\">{$modified}</dcterms:modified>"
             . '</cp:coreProperties>';
+    }
+
+    /**
+     * A deck-supplied timestamp, or `$fallback`. Non-strings and the empty
+     * string are NOT timestamps -- writing `0` or `` into a W3CDTF field would
+     * produce a document a reader can reject, which is worse than the clock.
+     */
+    private function timestampOr(mixed $value, string $fallback): string
+    {
+        return is_string($value) && $value !== '' ? $value : $fallback;
     }
 
     private function buildAppProps(int $slideCount): string
