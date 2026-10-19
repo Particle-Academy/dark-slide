@@ -131,3 +131,47 @@ it('writes what it read to the same slide and theme parts', function () {
     expect($again['ppt/theme/theme1.xml'])->toBe($original['ppt/theme/theme1.xml'])
         ->and($again['ppt/slides/slide1.xml'])->toBe($original['ppt/slides/slide1.xml']);
 });
+
+it('reads a native chart back as the ECharts option that writes it', function () {
+    // Charts vanished on read: a graphicFrame holding a chart returned nothing,
+    // so every viewer of a read-back deck showed an empty slide where the chart
+    // was, and an edit-and-write lost it outright.
+    $option = [
+        'color' => ['#38BDF8', '#F59E0B'],
+        'legend' => [],
+        'xAxis' => ['type' => 'category', 'data' => ['Leeds', 'Bristol', 'Norwich']],
+        'yAxis' => ['type' => 'value'],
+        'series' => [
+            ['type' => 'bar', 'name' => 'On-time %', 'label' => ['show' => true],
+                'data' => [96.1, 95.4, ['value' => 90.7, 'itemStyle' => ['color' => '#DC2626']]]],
+            ['type' => 'bar', 'name' => 'Target', 'data' => [95, 95, 95]],
+        ],
+    ];
+    $deck = rksDeck();
+    $deck['slides'][0]['elements'] = [['id' => 'depot-chart', 'type' => 'chart', 'x' => 0.06, 'y' => 0.2, 'w' => 0.6, 'h' => 0.6, 'option' => $option]];
+
+    $read = rksRead($deck)['slides'][0]['elements'];
+    expect($read)->toHaveCount(1)
+        ->and($read[0])->toMatchArray(['id' => 'depot-chart', 'type' => 'chart'])
+        ->and($read[0]['option']['xAxis']['data'])->toBe(['Leeds', 'Bristol', 'Norwich'])
+        ->and($read[0]['option']['series'][0]['name'])->toBe('On-time %')
+        ->and($read[0]['option']['series'][0]['label'])->toBe(['show' => true])
+        ->and($read[0]['option']['series'][0]['data'][2])->toBe(['value' => 90.7, 'itemStyle' => ['color' => '#DC2626']])
+        ->and($read[0]['option'])->toHaveKey('legend');
+
+    $original = rksParts(Agent::toBytes($deck));
+    $again = rksParts(Agent::toBytes(rksRead($deck)));
+    $chart = fn (string $bytes): string => (function () use ($bytes) {
+        $path = tempnam(sys_get_temp_dir(), 'rks').'.pptx';
+        file_put_contents($path, $bytes);
+        $zip = new ZipArchive();
+        $zip->open($path);
+        $xml = (string) $zip->getFromName('ppt/charts/chart1.xml');
+        $zip->close();
+        @unlink($path);
+
+        return $xml;
+    })();
+    expect($chart(Agent::toBytes(rksRead($deck))))->toBe($chart(Agent::toBytes($deck)))
+        ->and($again['ppt/slides/slide1.xml'])->toBe($original['ppt/slides/slide1.xml']);
+});

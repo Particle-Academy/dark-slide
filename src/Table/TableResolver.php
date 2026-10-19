@@ -100,7 +100,7 @@ final class TableResolver
         $stripeOn = $stripeSpec !== false;
         $stripeStyle = is_array($stripeSpec) ? $stripeSpec : [];
 
-        $tableDefaults = self::tableDefaults($accent);
+        $tableDefaults = self::tableDefaults($accent, $theme);
         $tableStyle = self::styleKeys($style);
 
         // Build the logical grid first, so a span knows what it covers before
@@ -125,7 +125,7 @@ final class TableResolver
             if (! $isHeader && $stripeOn) {
                 $bodyIndex = $hasHeader ? $r - 1 : $r;
                 if ($bodyIndex % 2 === 1) {
-                    $bandStyle = array_merge($bandStyle, self::stripeDefaults(), $stripeStyle);
+                    $bandStyle = array_merge($bandStyle, self::stripeDefaults($theme), $stripeStyle);
                 }
             }
 
@@ -583,10 +583,13 @@ final class TableResolver
     // ─── Bands + defaults ─────────────────────────────────────────────────
 
     /** @return array<string, mixed> */
-    private static function tableDefaults(string $accent): array
+    /** @param array<string, mixed> $theme */
+    private static function tableDefaults(string $accent, array $theme = []): array
     {
         return [
-            'color' => self::DEFAULT_BODY_COLOR,
+            // The theme's text colour, as a text box takes it. A fixed #0F172A
+            // printed a dark deck's table navy on navy: rows read as empty.
+            'color' => self::themeColor($theme, 'text', self::DEFAULT_BODY_COLOR),
             'align' => 'left',
             'anchor' => 'middle',
             'fontSize' => self::DEFAULT_FONT_SIZE,
@@ -599,10 +602,51 @@ final class TableResolver
         return ['fill' => $accent, 'color' => self::DEFAULT_HEADER_COLOR, 'bold' => true];
     }
 
-    /** @return array<string, mixed> */
-    private static function stripeDefaults(): array
+    /**
+     * The stripe band: the theme's surface colour; on a DARK theme without one,
+     * the background blended 8% toward the text colour; otherwise the light
+     * default. A near-white band on a dark deck under light text hid every
+     * striped row.
+     *
+     * @param  array<string, mixed>  $theme
+     * @return array<string, mixed>
+     */
+    private static function stripeDefaults(array $theme = []): array
     {
+        $colors = is_array($theme['colors'] ?? null) ? $theme['colors'] : [];
+        if (is_string($colors['surface'] ?? null) && $colors['surface'] !== '') {
+            return ['fill' => $colors['surface']];
+        }
+        $bg = is_string($colors['background'] ?? null) ? self::hex($colors['background'], 'FFFFFF') : 'FFFFFF';
+        if (self::luminance($bg) < 0.5) {
+            $text = self::hex(self::themeColor($theme, 'text', '#F9FAFB'), 'F9FAFB');
+
+            return ['fill' => '#'.self::blend($bg, $text, 8)];
+        }
+
         return ['fill' => self::DEFAULT_STRIPE_FILL];
+    }
+
+    /** Relative brightness 0..1 of a 6-digit hex (Rec. 601 weights, integer channels). */
+    private static function luminance(string $hex): float
+    {
+        return (299 * hexdec(substr($hex, 0, 2)) + 587 * hexdec(substr($hex, 2, 2)) + 114 * hexdec(substr($hex, 4, 2))) / 255000;
+    }
+
+    /**
+     * $a moved $percent% of the way to $b, channel by channel, in integer
+     * arithmetic (intdiv rounds toward zero) so the three engines agree.
+     */
+    private static function blend(string $a, string $b, int $percent): string
+    {
+        $out = '';
+        foreach ([0, 2, 4] as $i) {
+            $x = (int) hexdec(substr($a, $i, 2));
+            $y = (int) hexdec(substr($b, $i, 2));
+            $out .= sprintf('%02X', $x + intdiv(($y - $x) * $percent, 100));
+        }
+
+        return $out;
     }
 
     /**

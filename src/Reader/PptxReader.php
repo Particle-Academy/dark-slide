@@ -56,6 +56,8 @@ final class PptxReader
     private const NS_P = 'http://schemas.openxmlformats.org/presentationml/2006/main';
     private const NS_R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 
+    private const NS_C = 'http://schemas.openxmlformats.org/drawingml/2006/chart';
+
     /** Current slide's relationships, keyed by rId -> ['type' => ..., 'target' => ...]. */
     private array $currentSlideRels = [];
 
@@ -1145,7 +1147,7 @@ final class PptxReader
 
         $tbl = $gf->xpath('.//a:tbl')[0] ?? null;
         if ($tbl === null) {
-            return null;
+            return $this->parseChartFrame($gf, $offset, $extent);
         }
         $tbl->registerXPathNamespace('a', self::NS_A);
 
@@ -1207,6 +1209,179 @@ final class PptxReader
             'columns' => $columns,
             'rows' => $bodyRows,
         ];
+    }
+
+    /**
+     * A native chart, back as the ECharts option that writes it (the inverse of
+     * Helpers\ChartTranslator). Charts used to vanish on read, so a read-back
+     * deck showed an empty slide and an edit-and-write dropped the chart.
+     *
+     * What comes back: the kind (an area chart is a line with `areaStyle`), the
+     * title, the category labels, each series' name, values, colour (as
+     * `itemStyle.color`) and smoothing, single-point colours as
+     * `data[i].itemStyle`, data labels as `label.show`, and the legend. Read from
+     * the part's literal caches; a chart this reader does not model is null.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function parseChartFrame(SimpleXMLElement $gf, SimpleXMLElement $offset, SimpleXMLElement $extent): ?array
+    {
+        $gf->registerXPathNamespace('c', self::NS_C);
+        $gf->registerXPathNamespace('r', self::NS_R);
+        $ref = $gf->xpath('.//c:chart')[0] ?? null;
+        $rid = $ref === null ? '' : (string) ($ref->attributes(self::NS_R)['id'] ?? '');
+        $target = $this->currentSlideRels[$rid]['target'] ?? null;
+        $xml = $target !== null && $this->currentZip !== null ? $this->currentZip->getFromName($target) : false;
+        $sx = $xml === false || stripos($xml, '<!DOCTYPE') !== false ? false : @simplexml_load_string($xml);
+        if ($sx === false) {
+            return null;
+        }
+        $sx->registerXPathNamespace('c', self::NS_C);
+        $sx->registerXPathNamespace('a', self::NS_A);
+
+        $plot = null;
+        $tag = '';
+        foreach (['barChart', 'lineChart', 'areaChart', 'pieChart', 'scatterChart'] as $candidate) {
+            $plot = $sx->xpath('//c:plotArea/c:'.$candidate)[0] ?? null;
+            if ($plot !== null) {
+                $tag = $candidate;
+                break;
+            }
+        }
+        if ($plot === null) {
+            return null;
+        }
+        $type = match ($tag) {
+            'barChart' => 'bar',
+            'pieChart' => 'pie',
+            'scatterChart' => 'scatter',
+            default => 'line',
+        };
+
+        $categories = [];
+        $series = [];
+        foreach ($plot->children(self::NS_C) as $ser) {
+            if ($ser->getName() !== 'ser') {
+                continue;
+            }
+            $ser->registerXPathNamespace('c', self::NS_C);
+            $ser->registerXPathNamespace('a', self::NS_A);
+            if ($categories === [] && $type !== 'scatter') {
+                $categories = array_map('strval', $this->chartPoints($ser, 'c:cat'));
+            }
+            $one = ['type' => $type];
+            $name = $ser->xpath('c:tx//c:v')[0] ?? null;
+            if ($name !== null) {
+                $one['name'] = (string) $name;
+            }
+            $colorPath = match ($tag) {
+                'lineChart' => 'c:spPr/a:ln/a:solidFill/a:srgbClr',
+                'pieChart', 'scatterChart' => null,
+                default => 'c:spPr/a:solidFill/a:srgbClr',
+            };
+            $colorNode = $colorPath === null ? null : ($ser->xpath($colorPath)[0] ?? null);
+            if ($colorNode !== null && preg_match('/^[0-9A-F]{6}$/', strtoupper((string) $colorNode['val'])) === 1) {
+                $one['itemStyle'] = ['color' => '#'.strtoupper((string) $colorNode['val'])];
+            }
+            if ($tag === 'areaChart') {
+                $one['areaStyle'] = [];
+            }
+            if ((string) (($ser->xpath('c:smooth')[0] ?? null)['val'] ?? '') === '1') {
+                $one['smooth'] = true;
+            }
+            if ((string) (($ser->xpath('c:dLbls/c:showVal')[0] ?? null)['val'] ?? '') === '1') {
+                $one['label'] = ['show' => true];
+            }
+
+            if ($type === 'scatter') {
+                $xs = $this->chartPoints($ser, 'c:xVal');
+                $ys = $this->chartPoints($ser, 'c:yVal');
+                $data = [];
+                foreach ($xs as $i => $x) {
+                    $data[] = [(float) $x, (float) ($ys[$i] ?? 0)];
+                }
+            } else {
+                $pointColors = [];
+                foreach ($ser->xpath('c:dPt') ?: [] as $dPt) {
+                    $dPt->registerXPathNamespace('c', self::NS_C);
+                    $dPt->registerXPathNamespace('a', self::NS_A);
+                    $idx = (string) (($dPt->xpath('c:idx')[0] ?? null)['val'] ?? '');
+                    $clr = strtoupper((string) (($dPt->xpath('.//a:srgbClr')[0] ?? null)['val'] ?? ''));
+                    if (ctype_digit($idx) && preg_match('/^[0-9A-F]{6}$/', $clr) === 1) {
+                        $pointColors[(int) $idx] = '#'.$clr;
+                    }
+                }
+                $data = [];
+                foreach ($this->chartPoints($ser, 'c:val') as $i => $v) {
+                    $value = (float) $v;
+                    if ($type === 'pie') {
+                        $point = ['name' => $categories[$i] ?? '', 'value' => $value];
+                        if (isset($pointColors[$i])) {
+                            $point['itemStyle'] = ['color' => $pointColors[$i]];
+                        }
+                        $data[] = $point;
+                    } elseif (isset($pointColors[$i])) {
+                        $data[] = ['value' => $value, 'itemStyle' => ['color' => $pointColors[$i]]];
+                    } else {
+                        $data[] = $value;
+                    }
+                }
+            }
+            $one['data'] = $data;
+            $series[] = $one;
+        }
+        if ($series === []) {
+            return null;
+        }
+
+        $option = [];
+        $title = implode('', array_map('strval', $sx->xpath('//c:chart/c:title//a:t') ?: []));
+        if ($title !== '') {
+            $option['title'] = ['text' => $title];
+        }
+        if (($sx->xpath('//c:chart/c:legend') ?: []) !== []) {
+            $option['legend'] = [];
+        }
+        if ($type === 'scatter') {
+            $option['xAxis'] = ['type' => 'value'];
+            $option['yAxis'] = ['type' => 'value'];
+        } elseif ($type !== 'pie') {
+            $option['xAxis'] = ['type' => 'category', 'data' => $categories];
+            $option['yAxis'] = ['type' => 'value'];
+        }
+        $option['series'] = $series;
+
+        return [
+            'id' => (string) ($gf->xpath('.//p:cNvPr')[0]['name'] ?? $this->nextFallbackId('imported-chart-')),
+            'type' => 'chart',
+            'x' => $this->fracX((int) $offset['x']),
+            'y' => $this->fracY((int) $offset['y']),
+            'w' => $this->fracX((int) $extent['cx']),
+            'h' => $this->fracY((int) $extent['cy']),
+            'option' => $option,
+        ];
+    }
+
+    /**
+     * A series' cached points under `$host` (c:cat, c:val, c:xVal, c:yVal), in
+     * index order, as strings; an index with no point is ''.
+     *
+     * @return list<string>
+     */
+    private function chartPoints(SimpleXMLElement $ser, string $host): array
+    {
+        $ser->registerXPathNamespace('c', self::NS_C);
+        $count = (int) (($ser->xpath($host.'//c:ptCount')[0] ?? null)['val'] ?? 0);
+        $out = array_fill(0, max(0, $count), '');
+        foreach ($ser->xpath($host.'//c:pt') ?: [] as $pt) {
+            $pt->registerXPathNamespace('c', self::NS_C);
+            $idx = (int) $pt['idx'];
+            if ($idx >= 0 && $idx < $count) {
+                $out[$idx] = (string) ($pt->xpath('c:v')[0] ?? '');
+            }
+        }
+
+        return $out;
     }
 
     private function cellText(SimpleXMLElement $cell): string

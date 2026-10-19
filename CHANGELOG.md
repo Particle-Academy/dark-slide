@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-19
+
+### Changed
+
+- **`read()` brings native charts back** as the ECharts `option` that writes
+  them: the kind (an area chart is a line with `areaStyle`), the title, the
+  category labels, each series' name, values, colour (`itemStyle.color`) and
+  smoothing, single-point colours (`data[i].itemStyle`), data labels
+  (`label.show`) and the legend. Charts used to vanish on read, so every viewer
+  of a read-back deck showed an empty slide where the chart was, and an
+  edit-and-write lost it. Writing what was read reproduces the chart part byte
+  for byte. **What to do:** a deck with charts now reads back with one more
+  element per chart, and, as with any change to what a read contains, its
+  content-digest id differs from the previous version's.
+
+### Fixed
+
+- **Table text and stripes follow the theme.** Body text was always the
+  light-theme `#0F172A` and stripes `#F8FAFC`, so on a dark deck every
+  unstriped row printed navy on navy and read as empty, in PowerPoint and
+  LibreOffice alike. Body text now takes `theme.colors.text` (as a text box
+  does), and the stripe band takes `theme.colors.surface`, or on a dark
+  background without one, the background blended 8% toward the text colour.
+  **What to do: nothing.** A light deck that sets no text colour is
+  byte-identical; one that does now gets that colour in its tables.
+
 ## [0.19.1] - 2026-10-19
 
 ### Fixed
