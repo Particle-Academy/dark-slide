@@ -101,3 +101,9 @@ it('writes what it always did when the option names no colour', function () {
 
     expect(ccChart($plain))->not->toContain('<c:dPt>');
 });
+
+it('starts a bar axis at zero, unless a value is negative or it is a line', function () {
+    expect(ccChart(CC_BARS))->toContain('<c:scaling><c:orientation val="minMax"/><c:min val="0"/></c:scaling>')
+        ->and(ccChart(['xAxis' => ['data' => ['A', 'B']], 'series' => [['type' => 'bar', 'data' => [3, -1]]]]))->not->toContain('<c:min val="0"/>')
+        ->and(ccChart(['xAxis' => ['data' => ['A', 'B']], 'series' => [['type' => 'line', 'data' => [96, 91]]]]))->not->toContain('<c:min val="0"/>');
+});

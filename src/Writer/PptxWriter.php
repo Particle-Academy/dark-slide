@@ -2343,7 +2343,7 @@ final class PptxWriter
             . '<c:axId val="111111111"/>'
             . '<c:axId val="222222222"/>'
             . '</c:barChart>'
-            . $this->buildCatValAxes();
+            . $this->buildCatValAxes(self::nonNegative($spec));
     }
 
     /**
@@ -2384,7 +2384,7 @@ final class PptxWriter
                 . '<c:axId val="111111111"/>'
                 . '<c:axId val="222222222"/>'
                 . '</c:areaChart>'
-                . $this->buildCatValAxes();
+                . $this->buildCatValAxes(self::nonNegative($spec));
         }
 
         return '<c:lineChart>'
@@ -2471,8 +2471,28 @@ final class PptxWriter
             . '<c:valAx><c:axId val="222222222"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="l"/><c:crossAx val="111111111"/></c:valAx>';
     }
 
+    /**
+     * Every plotted value is zero or more: the value axis of a bar or area
+     * chart then starts at zero. Left to the renderer, an axis over values
+     * like 90-97 starts near 88 and a three-point gap reads as a collapse.
+     *
+     * @param  array{series: list<array<string, mixed>>}  $spec
+     */
+    private static function nonNegative(array $spec): bool
+    {
+        foreach ($spec['series'] as $series) {
+            foreach (is_array($series['values'] ?? null) ? $series['values'] : [] as $v) {
+                if ((float) $v < 0) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
     /** Category + value axis pair shared by bar / line / area charts. */
-    private function buildCatValAxes(): string
+    private function buildCatValAxes(bool $zeroBase = false): string
     {
         return '<c:catAx>'
             . '<c:axId val="111111111"/>'
@@ -2488,7 +2508,7 @@ final class PptxWriter
             . '</c:catAx>'
             . '<c:valAx>'
             . '<c:axId val="222222222"/>'
-            . '<c:scaling><c:orientation val="minMax"/></c:scaling>'
+            . '<c:scaling><c:orientation val="minMax"/>' . ($zeroBase ? '<c:min val="0"/>' : '') . '</c:scaling>'
             . '<c:delete val="0"/>'
             . '<c:axPos val="l"/>'
             . '<c:majorTickMark val="none"/>'
