@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-19
+
+### Added
+
+- **`Agent::lint($deck)`: layout problems that will show on the slides, from the
+  deck alone.** Returns `[{code, slide, element, message}]` for text that will
+  wrap past its box (`text-overflow`), text running into another element
+  (`overlap`, ignoring a panel behind the text), boxes off the slide
+  (`off-slide`), KPI values too wide for their cells (`kpi-overflow`, with the
+  size that fits) and text under 12pt when projected (`small-text`). Read-only;
+  `Layout::fit` is the one that changes a slide. Hand the findings back to the
+  agent that built the deck and let it write again: measured in fancy-labs,
+  decks whose title wrapped onto the accent rule under it were gated by a
+  reviewer 2 runs in 2, and 0 in 2 with lint findings returned from the write.
+  The metrics are conservative on purpose (a viewer without the brand font gets
+  a wider substitute). Messages are identical in all three engines;
+  `@particle-academy/dark-slide` 0.14.0 and `fancy-dark-slide` 0.9.0 ship the
+  same function. **Nothing to do**: nothing calls it for you.
+
 ## [0.15.0] - 2026-10-19
 
 Native charts now look like the chart fancy-slides draws from the same option.

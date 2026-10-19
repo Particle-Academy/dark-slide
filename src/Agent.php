@@ -194,6 +194,22 @@ final class Agent
     }
 
     /**
+     * Layout problems that will show on the slides: text that will wrap past its
+     * box, text running into another element, boxes off the slide, KPI values too
+     * wide for their cells, text too small to read when projected. Read-only.
+     *
+     * Hand the findings back to the agent that built the deck and let it write
+     * again; see {@see Lint} for the metrics and why they are conservative.
+     *
+     * @param  array<string, mixed>  $deck
+     * @return list<array{code: string, slide: int, element: string, message: string}>
+     */
+    public static function lint(array $deck): array
+    {
+        return Lint::deck($deck);
+    }
+
+    /**
      * Plain-text summary of a deck — slide count, layouts, element counts
      * per type. Useful as an agent tool that "describes" a deck without
      * dumping the full JSON back to the model.

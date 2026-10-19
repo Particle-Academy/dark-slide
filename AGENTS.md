@@ -99,7 +99,9 @@ both run THIS package as a subprocess and compare every part. So:
 
 ```
 src/
-  Agent.php                 the public façade (validate / write / toBytes / read)
+  Agent.php                 the public façade (validate / write / toBytes / read / lint)
+  Lint.php                  layout findings from the deck alone; messages are byte-identical
+                            across the three engines (the tests pin the strings)
   Schema/                   Schema · Validator · Repairer
   Writer/PptxWriter.php     string building; the byte contract lives here
   Reader/PptxReader.php     SimpleXML; best-effort, degrades rather than raises
