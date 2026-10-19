@@ -2,6 +2,34 @@
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-19
+
+Native charts now look like the chart fancy-slides draws from the same option.
+Found by rendering agent-built decks for review: every chart had a legend for
+its one series, a dense rule of minor ticks and no values, and reviewers marked
+all three as "default styling". Lands with `@particle-academy/dark-slide` 0.13.0
+and `fancy-dark-slide` 0.8.0; parity holds.
+
+### Changed
+
+- **A chart draws a legend only when `option.legend` is set** (and `show` is not
+  `false`), which is when ECharts draws one. It used to draw one always.
+  **To keep a legend, add `"legend": {}` to the option.** A single-series chart
+  usually reads better without one: the slide title and series name already say
+  what is plotted.
+- **A shape's outline defaults to `theme.colors.accent`**, as fancy-slides draws
+  it, instead of a fixed purple `#8B5CF6`. An orange brand's accent rules no
+  longer carry a purple edge. Set `stroke` (or `strokeWidth: 0`) to choose.
+- **Axes state their tick marks**: major ticks out on the category axis, none on
+  the value axis, no minor ticks. Left unstated, LibreOffice drew minor ticks
+  ECharts never draws. Nothing to do.
+
+### Added
+
+- **Data labels**: `series[].label: {"show": true}` draws each value on the chart
+  (bars above the bar, lines above the point, pie slices best fit), as ECharts
+  does. Off by default. Both new keys are in the published schema.
+
 ## [0.14.1] - 2026-10-18
 
 ### Fixed

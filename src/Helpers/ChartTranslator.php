@@ -25,8 +25,8 @@ namespace DarkSlide\Helpers;
  *
  * Pure data, no runtime dependencies.
  *
- * @phpstan-type ChartSeries array{type: string, name: string, values: list<float>, smooth: bool, area: bool, points: list<array{x: float, y: float}>}
- * @phpstan-type ChartSpec array{kind: string, title: string, categories: list<string>, series: list<ChartSeries>}
+ * @phpstan-type ChartSeries array{type: string, name: string, values: list<float>, smooth: bool, area: bool, points: list<array{x: float, y: float}>, labels: bool}
+ * @phpstan-type ChartSpec array{kind: string, title: string, categories: list<string>, series: list<ChartSeries>, legend: bool}
  */
 final class ChartTranslator
 {
@@ -92,6 +92,7 @@ final class ChartTranslator
             'title' => self::extractTitle($option),
             'categories' => $categories,
             'series' => $series,
+            'legend' => self::wantsLegend($option),
         ];
     }
 
@@ -214,7 +215,22 @@ final class ChartTranslator
             'smooth' => !empty($raw['smooth']),
             'area' => $area,
             'points' => $points,
+            // ECharts' `label.show`: the series' values drawn on the chart.
+            'labels' => is_array($raw['label'] ?? null) && ($raw['label']['show'] ?? false) === true,
         ];
+    }
+
+    /**
+     * Whether the chart draws a legend: only when `option.legend` is set and not
+     * switched off, which is when ECharts draws one.
+     *
+     * @param  array<string, mixed>  $option
+     */
+    private static function wantsLegend(array $option): bool
+    {
+        $legend = $option['legend'] ?? null;
+
+        return is_array($legend) && ($legend['show'] ?? true) !== false;
     }
 
     /**

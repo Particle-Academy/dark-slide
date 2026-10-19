@@ -1839,7 +1839,9 @@ final class PptxWriter
         };
 
         [$fillHex, $fillAlpha] = Color::parse($element['fill'] ?? 'rgba(139,92,246,0.15)', '8B5CF6');
-        [$strokeHex, $strokeAlpha] = Color::parse($element['stroke'] ?? '#8B5CF6', '8B5CF6');
+        // The theme accent, as fancy-slides draws it. A fixed purple put a purple
+        // edge on every shape of an orange (or any) brand.
+        [$strokeHex, $strokeAlpha] = Color::parse($element['stroke'] ?? $this->deckTheme['colors']['accent'] ?? '#8B5CF6', '8B5CF6');
         // Design pixels, as fancy-slides draws it: the default 2px is 0.75pt.
         $strokeWidth = (float) ($element['strokeWidth'] ?? 2);
         $strokeWidthEmu = Emu::fromPt(DesignUnits::toPt($strokeWidth, $this->deckTheme));
@@ -2301,7 +2303,9 @@ final class PptxWriter
             . '<c:layout/>'
             . $plot
             . '</c:plotArea>'
-            . '<c:legend><c:legendPos val="b"/><c:overlay val="0"/></c:legend>'
+            // Only when the option asks, as ECharts draws it: a legend for one
+            // series repeats the title and was the commonest "default chart" note.
+            . ($spec['legend'] ? '<c:legend><c:legendPos val="b"/><c:overlay val="0"/></c:legend>' : '')
             . '<c:plotVisOnly val="1"/>'
             . '<c:dispBlanksAs val="gap"/>'
             . '</c:chart>'
@@ -2320,6 +2324,7 @@ final class PptxWriter
                 . '<c:order val="' . $idx . '"/>'
                 . $this->chartSeriesName($series, $idx)
                 . $this->chartSeriesFill($idx)
+                . $this->chartDataLabels($series, 'outEnd')
                 . $this->chartCatRef($spec['categories'], $series['values'])
                 . $this->chartValRef($series['values'])
                 . '</c:ser>';
@@ -2358,6 +2363,7 @@ final class PptxWriter
                 . '<c:order val="' . $idx . '"/>'
                 . $this->chartSeriesName($series, $idx)
                 . $this->chartSeriesLine($idx)
+                . $this->chartDataLabels($series, $isArea ? null : 't')
                 . $this->chartCatRef($spec['categories'], $series['values'])
                 . $this->chartValRef($series['values'])
                 . $smooth
@@ -2414,6 +2420,7 @@ final class PptxWriter
             . '<c:order val="0"/>'
             . $this->chartSeriesName($series, 0)
             . $dPts
+            . $this->chartDataLabels($series, 'bestFit')
             . $this->chartCatRef($categories, $values)
             . $this->chartValRef($values)
             . '</c:ser>'
@@ -2465,6 +2472,11 @@ final class PptxWriter
             . '<c:scaling><c:orientation val="minMax"/></c:scaling>'
             . '<c:delete val="0"/>'
             . '<c:axPos val="b"/>'
+            // Stated, never left to a reader's default: absent tick marks drew a
+            // dense rule of minor ticks in LibreOffice, which ECharts never draws.
+            . '<c:majorTickMark val="out"/>'
+            . '<c:minorTickMark val="none"/>'
+            . '<c:tickLblPos val="nextTo"/>'
             . '<c:crossAx val="222222222"/>'
             . '</c:catAx>'
             . '<c:valAx>'
@@ -2472,6 +2484,9 @@ final class PptxWriter
             . '<c:scaling><c:orientation val="minMax"/></c:scaling>'
             . '<c:delete val="0"/>'
             . '<c:axPos val="l"/>'
+            . '<c:majorTickMark val="none"/>'
+            . '<c:minorTickMark val="none"/>'
+            . '<c:tickLblPos val="nextTo"/>'
             . '<c:crossAx val="111111111"/>'
             . '</c:valAx>';
     }
@@ -2488,6 +2503,27 @@ final class PptxWriter
             : 'Series ' . ($idx + 1);
 
         return '<c:tx><c:strRef><c:f>Sheet1!$A$' . ($idx + 1) . '</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>' . Xml::text($name) . '</c:v></c:pt></c:strCache></c:strRef></c:tx>';
+    }
+
+    /**
+     * `<c:dLbls>` showing each point's value, when the series asks for it with
+     * ECharts' `label.show`; '' otherwise. `$position` is omitted for an area
+     * series, which takes no `dLblPos`.
+     *
+     * @param  array<string, mixed>  $series
+     */
+    private function chartDataLabels(array $series, ?string $position): string
+    {
+        if (empty($series['labels'])) {
+            return '';
+        }
+
+        return '<c:dLbls>'
+            . '<c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr>'
+            . ($position !== null ? '<c:dLblPos val="' . $position . '"/>' : '')
+            . '<c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/>'
+            . '<c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/>'
+            . '</c:dLbls>';
     }
 
     /** Solid-fill `<c:spPr>` for a bar/area series, colored from the palette. */
