@@ -193,11 +193,43 @@ final class Lint
             // Spaces and tabs, spelled out: `\s` means different sets in the three
             // engines' regex flavours, and the messages must match.
             $plain = preg_replace(['/\*\*|__|`/', '/^[ \t]*[-*][ \t]+/', '/^#+[ \t]+/'], '', $line) ?? $line;
-            $chars = (int) preg_match_all('/./us', $plain);
-            $lines += max(1, (int) ceil(($chars * $glyph) / $usable));
+            $lines += self::wrappedLines($plain, max(1, (int) floor($usable / $glyph)));
         }
 
         return $lines * self::LINE * $font + 2 * $padY;
+    }
+
+    /**
+     * Lines one paragraph takes, wrapped greedily by WORD as a renderer wraps it.
+     *
+     * A character count (total width over line width) said "Q3 Business Review"
+     * at 150px was two lines in a box where no line holds "Q3 Business", so it is
+     * three. Integer arithmetic on character counts, so the three engines agree;
+     * a word longer than a line breaks across lines, as renderers do.
+     */
+    private static function wrappedLines(string $text, int $perLine): int
+    {
+        $lines = 1;
+        $used = 0;
+        foreach (preg_split('/[ \t]+/', $text) ?: [] as $word) {
+            $n = (int) preg_match_all('/./us', $word);
+            if ($n === 0) {
+                continue;
+            }
+            if ($used > 0 && $used + 1 + $n <= $perLine) {
+                $used += 1 + $n;
+
+                continue;
+            }
+            if ($used > 0) {
+                $lines++;
+            }
+            $extra = intdiv($n - 1, $perLine);
+            $lines += $extra;
+            $used = $n - $extra * $perLine;
+        }
+
+        return $lines;
     }
 
     /** @return array{0: float, 1: float} horizontal and vertical inset, design px */

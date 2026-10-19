@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-10-19
+
+### Fixed
+
+- **`Agent::lint` wraps text by WORD, as a renderer does.** It counted
+  characters (total width over line width), so "Q3 Business Review" at 150px
+  in a 0.54-wide box measured two lines and was not flagged. No renderer breaks
+  inside a word and "Q3 Business" does not fit, so it is three lines, and the
+  title ran into the subtitle on an agent-built cover slide. Lines are now
+  wrapped greedily by word, in integer arithmetic so the three engines agree; a
+  word longer than a line still breaks across lines. **What to do: nothing.**
+  More findings can appear for text that genuinely will not fit.
+
 ## [0.18.0] - 2026-10-19
 
 ### Added

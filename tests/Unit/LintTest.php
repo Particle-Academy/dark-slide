@@ -113,3 +113,19 @@ it('names markdown markers in a box that is not markdown, which print as typed',
         ['code' => 'literal-markdown', 'slide' => 1, 'element' => 'head', 'message' => 'This text uses markdown (**bold** or a # heading) but its format is not "markdown", so the markers print as typed. Set "format": "markdown", or remove the markers.'],
     ]);
 });
+
+it('wraps by WORD, as a renderer does', function () {
+    // "Q3 Business Review" at 150px in a 0.54-wide box: 18 characters measure 1.7
+    // lines, so a character count said two lines and nothing was flagged. But no
+    // renderer breaks inside a word: "Q3 Business" does not fit, so it is three
+    // lines, and the title ran into the subtitle beneath it on the slide.
+    $findings = Agent::lint(lintDeck([
+        ['id' => 'title', 'type' => 'text', 'x' => 0.06, 'y' => 0.27, 'w' => 0.54, 'h' => 0.5,
+            'content' => 'Q3 Business Review', 'style' => ['fontSize' => 150, 'weight' => 700]],
+        ['id' => 'sub', 'type' => 'text', 'x' => 0.06, 'y' => 0.79, 'w' => 0.54, 'h' => 0.12,
+            'content' => 'Regional revenue results', 'style' => ['fontSize' => 44]],
+    ]));
+
+    expect(array_column($findings, 'code'))->toBe(['text-overflow', 'overlap', 'overlap'])
+        ->and($findings[0]['message'])->toStartWith('At 150px this text needs about 0.54 of the slide height and its box is 0.5:');
+});
