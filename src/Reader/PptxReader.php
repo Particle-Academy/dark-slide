@@ -1185,16 +1185,82 @@ final class PptxReader
             $columns[] = $column;
         }
 
+        // Styling, read as the cell model that writes it (Table\TableResolver):
+        // what every body cell shares becomes the table's `style`, the header
+        // row's look becomes `style.header`, the band on every second body row
+        // becomes `style.stripe`, and a cell carries only what it does
+        // differently from all of that.
+        $bodyStart = $hasHeader ? 1 : 0;
+        $bodyStyles = [];
+        $oddFills = [];
+        for ($r = $bodyStart; $r < count($rows); $r++) {
+            foreach ($rows[$r]->xpath('.//a:tc') ?: [] as $tc) {
+                $look = $this->cellStyle($tc);
+                $bodyStyles[] = $look;
+                if (($r - $bodyStart) % 2 === 1) {
+                    $oddFills[] = $look['fill'];
+                }
+            }
+        }
+        $tableColor = self::modal(array_column($bodyStyles, 'color'));
+        $tableSize = self::modal(array_column($bodyStyles, 'fontSize'));
+        $stripeFill = self::modal($oddFills);
+        $style = ['stripe' => $stripeFill === null ? false : ['fill' => $stripeFill]];
+        if ($tableColor !== null) {
+            $style['color'] = $tableColor;
+        }
+        if ($tableSize !== null) {
+            $style['fontSize'] = $tableSize;
+        }
+        if ($hasHeader && isset($firstCells[0])) {
+            $head = $this->cellStyle($firstCells[0]);
+            $header = ['fill' => $head['fill'] ?? 'none', 'bold' => $head['bold']];
+            if ($head['color'] !== null) {
+                $header['color'] = $head['color'];
+            }
+            if ($head['fontSize'] !== null && $head['fontSize'] !== $tableSize) {
+                $header['fontSize'] = $head['fontSize'];
+            }
+            $style['header'] = $header;
+        } else {
+            $style['header'] = false;
+        }
+
         // Body rows
         $bodyRows = [];
-        for ($r = $hasHeader ? 1 : 0; $r < count($rows); $r++) {
+        for ($r = $bodyStart; $r < count($rows); $r++) {
             $rowCells = $rows[$r]->xpath('.//a:tc') ?: [];
+            $band = ($r - $bodyStart) % 2 === 1 ? $stripeFill : null;
             $rowData = [];
             foreach ($columns as $i => $col) {
                 $cell = $rowCells[$i] ?? null;
-                if ($cell !== null) {
-                    $rowData[$col['key']] = $this->cellText($cell);
+                if ($cell === null) {
+                    continue;
                 }
+                $s = $this->cellStyle($cell);
+                $own = [];
+                if ($s['fill'] !== $band) {
+                    // A cell with no fill on a banded row has to say so.
+                    $own['fill'] = $s['fill'] ?? 'none';
+                }
+                if ($s['color'] !== null && $s['color'] !== $tableColor) {
+                    $own['color'] = $s['color'];
+                }
+                foreach (['bold', 'italic'] as $flag) {
+                    if ($s[$flag]) {
+                        $own[$flag] = true;
+                    }
+                }
+                if ($s['fontSize'] !== null && $s['fontSize'] !== $tableSize) {
+                    $own['fontSize'] = $s['fontSize'];
+                }
+                if ($s['align'] !== null) {
+                    $own['align'] = $s['align'];
+                }
+                if ($s['fontFamily'] !== null) {
+                    $own['fontFamily'] = $s['fontFamily'];
+                }
+                $rowData[$col['key']] = $own === [] ? $s['text'] : ['text' => $s['text']] + $own;
             }
             $bodyRows[] = $rowData;
         }
@@ -1208,6 +1274,7 @@ final class PptxReader
             'h' => $this->fracY((int) $extent['cy']),
             'columns' => $columns,
             'rows' => $bodyRows,
+            'style' => $style,
         ];
     }
 
@@ -1382,6 +1449,84 @@ final class PptxReader
         }
 
         return $out;
+    }
+
+    /**
+     * One table cell's text and look: its fill (tcPr's own solidFill, never a
+     * border's; null for noFill), and the first run's colour, weight, slant,
+     * size (design px) and face, with the paragraph's alignment (null = left).
+     *
+     * @return array{text: string, fill: ?string, color: ?string, bold: bool, italic: bool, fontSize: int|float|null, align: ?string, fontFamily: ?string}
+     */
+    private function cellStyle(SimpleXMLElement $tc): array
+    {
+        $tc->registerXPathNamespace('a', self::NS_A);
+        $fill = null;
+        $tcPr = $tc->xpath('a:tcPr')[0] ?? null;
+        if ($tcPr !== null) {
+            $solid = $this->aChild($tcPr, 'solidFill');
+            $fill = $solid !== null ? $this->solidFillColor($solid) : null;
+        }
+        $rPr = $tc->xpath('.//a:r/a:rPr')[0] ?? $tc->xpath('.//a:endParaRPr')[0] ?? null;
+        $color = null;
+        $sz = null;
+        $font = null;
+        $bold = false;
+        $italic = false;
+        if ($rPr !== null) {
+            $rPr->registerXPathNamespace('a', self::NS_A);
+            $solid = $this->aChild($rPr, 'solidFill');
+            $color = $solid !== null ? $this->solidFillColor($solid) : null;
+            $bold = (string) ($rPr['b'] ?? '0') === '1';
+            $italic = (string) ($rPr['i'] ?? '0') === '1';
+            $sz = ctype_digit((string) ($rPr['sz'] ?? '')) ? self::pxFromHundredths((int) $rPr['sz']) : null;
+            $latin = $rPr->xpath('a:latin')[0] ?? null;
+            $face = $latin === null ? '' : (string) $latin['typeface'];
+            $font = $face !== '' ? $face : null;
+        }
+        $algn = (string) (($tc->xpath('.//a:p/a:pPr')[0] ?? null)['algn'] ?? '');
+
+        return [
+            'text' => $this->cellText($tc),
+            'fill' => $fill,
+            'color' => $color,
+            'bold' => $bold,
+            'italic' => $italic,
+            'fontSize' => $sz,
+            'align' => match ($algn) {
+                'ctr' => 'center',
+                'r' => 'right',
+                'just' => 'justify',
+                default => null,
+            },
+            'fontFamily' => $font,
+        ];
+    }
+
+    /**
+     * The most common non-null value; a tie goes to the one seen first, so
+     * the three engines pick the same.
+     *
+     * @param  list<mixed>  $values
+     */
+    private static function modal(array $values): mixed
+    {
+        $best = null;
+        $bestCount = 0;
+        $seen = [];
+        foreach ($values as $v) {
+            if ($v === null) {
+                continue;
+            }
+            $key = is_string($v) ? 's:'.$v : 'n:'.$v;
+            $seen[$key] = ($seen[$key] ?? 0) + 1;
+            if ($seen[$key] > $bestCount) {
+                $best = $v;
+                $bestCount = $seen[$key];
+            }
+        }
+
+        return $best;
     }
 
     private function cellText(SimpleXMLElement $cell): string

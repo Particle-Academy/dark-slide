@@ -175,3 +175,28 @@ it('reads a native chart back as the ECharts option that writes it', function ()
     expect($chart(Agent::toBytes(rksRead($deck))))->toBe($chart(Agent::toBytes($deck)))
         ->and($again['ppt/slides/slide1.xml'])->toBe($original['ppt/slides/slide1.xml']);
 });
+
+it('reads a table back with its styling, as the cell model that writes it', function () {
+    // A table read back as bare text: every header band, status fill and cell
+    // colour was lost, so a viewer drew the scorecard unstyled and an
+    // edit-and-write printed it in the defaults.
+    $deck = rksDeck();
+    $deck['slides'][0]['elements'] = [[
+        'id' => 'kpi', 'type' => 'table', 'x' => 0.06, 'y' => 0.2, 'w' => 0.88, 'h' => 0.5,
+        'columns' => [['key' => 'k', 'label' => 'KPI', 'width' => 0.5], ['key' => 's', 'label' => 'Status', 'width' => 0.5]],
+        'rows' => [
+            ['k' => 'On-time delivery', 's' => ['text' => 'Below target', 'fill' => '#DC2626', 'color' => '#FFFFFF', 'bold' => true]],
+            ['k' => 'Damage rate', 's' => ['text' => 'On target', 'fill' => '#16A34A', 'color' => '#FFFFFF', 'bold' => true]],
+        ],
+        'style' => ['header' => ['fill' => '#38BDF8', 'color' => '#0B1220'], 'fontSize' => 36],
+    ]];
+
+    $table = rksRead($deck)['slides'][0]['elements'][0];
+    expect($table['type'])->toBe('table')
+        ->and($table['style']['header'])->toMatchArray(['fill' => '#38BDF8', 'color' => '#0B1220', 'bold' => true])
+        ->and($table['style']['fontSize'])->toBe(36)
+        ->and($table['rows'][0]['col1'])->toBe('On-time delivery')
+        ->and($table['rows'][0]['col2'])->toMatchArray(['text' => 'Below target', 'fill' => '#DC2626', 'color' => '#FFFFFF', 'bold' => true]);
+
+    expect(rksParts(Agent::toBytes(rksRead($deck)))['ppt/slides/slide1.xml'])->toBe(rksParts(Agent::toBytes($deck))['ppt/slides/slide1.xml']);
+});

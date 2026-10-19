@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-19
+
+### Changed
+
+- **`read()` keeps a table's styling**, as the cell model that writes it: the
+  header row's look becomes `style.header` (`fill`, `color`, `bold`, and a
+  `fontSize` when it differs), the colour and size every body cell shares
+  become the table's `style.color` / `style.fontSize`, the band on every second
+  body row becomes `style.stripe: {fill}`, and a cell is an object
+  (`{text, fill, color, bold, italic, fontSize, align, fontFamily}`) only where
+  it differs from all of that. A table used to come back as bare text, so a
+  viewer drew a status scorecard with no status colours and an edit-and-write
+  printed it in the defaults. Writing what was read reproduces the slide.
+  **What to do:** a table that was read back as plain strings still is, unless
+  its cells were styled; a styled cell now reads as an object, and the table
+  gains a `style`. Borders, merged cells and a per-column header style are not
+  read back yet.
+
 ## [0.20.0] - 2026-10-19
 
 ### Changed
