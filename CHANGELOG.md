@@ -2,6 +2,40 @@
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-19
+
+### Changed
+
+- **`read()` keeps the styling a deck was written with.** It used to return
+  geometry and text only, so an agent editing a branded deck (read it, change
+  one slide, write it) shipped every slide in default 28px text, default
+  colours and a purple tint on every panel, with nothing reporting the loss.
+  It now recovers:
+  - `theme.colors` (`background`, `text`, `accent`, `muted`, `surface`) and
+    `theme.fonts` (`heading`, `body`, and `mono` when the deck named one);
+  - a text element's `style`: `fontSize` (design pixels on the 1920 canvas),
+    `weight: 700` / `italic` / `underline` when every run has them, `color`,
+    `fontFamily`, `align` and `verticalAlign`;
+  - a shape's `fill`, `stroke`, `strokeWidth` and `dashed`. "No fill" and
+    "no outline" are stated as `"transparent"`, because an absent key writes
+    the default paint.
+
+  Writing what was read reproduces the slide and theme parts byte for byte for
+  everything above (pinned by a round-trip test in all three engines).
+- **A bold paragraph inside an otherwise plain box comes back bold.** Bold and
+  italic used to be decided per paragraph, so a paragraph whose every run was
+  bold read as "bold is the default" and lost it. They are decided per element
+  now, and a bold lead line reads as `**Lead line**`.
+- **What to do: nothing, unless you STORE read decks and compare their ids.**
+  A read now contains more, so the content-digest id of a deck read with this
+  version differs from the id the previous version gave the same file. Re-read
+  stored decks once if you compare ids across versions. The id is still a pure
+  function of the bytes, and identical across the three engines.
+
+  Still not recovered: a text box's own fill and border, paragraph spacing,
+  line height, a rounded corner's radius, markdown headings, and a composite
+  (`kpiBand`, `metadataGrid`), which reads back as the table it became.
+
 ## [0.16.0] - 2026-10-19
 
 ### Added

@@ -163,6 +163,7 @@ final class PptxReader
         ];
 
         $this->monoTypeface = $this->readMonoTypeface($zip);
+        $deck['theme'] += $this->readTheme($zip);
         $this->readSlideSize($zip);
         // 16:9 at 10in is the default and says nothing; any other shape is part
         // of the deck and comes back as its aspect ratio.
@@ -299,6 +300,244 @@ final class PptxReader
         return preg_match('/<ds:monoFont[^>]*typeface="([^"]*)"/', $xml, $m) === 1
             ? html_entity_decode($m[1], ENT_QUOTES | ENT_XML1, 'UTF-8')
             : '';
+    }
+
+    /**
+     * The theme's colours and fonts, in the deck's own keys: background = lt1,
+     * text = dk1, accent = accent1, muted = dk2, surface = lt2, heading = the
+     * major font, body = the minor font (the mapping the writer uses).
+     *
+     * A colour the part does not state as an sRGB value (or a system colour
+     * with a last-known value) is left out rather than guessed. The writer
+     * always states every one, so its own decks come back complete.
+     *
+     * @return array{colors?: array<string, string>, fonts?: array<string, string>}
+     */
+    private function readTheme(ZipArchive $zip): array
+    {
+        $xml = $zip->getFromName('ppt/theme/theme1.xml');
+        $sx = $xml === false || stripos($xml, '<!DOCTYPE') !== false ? false : @simplexml_load_string($xml);
+        if ($sx === false) {
+            return [];
+        }
+        $sx->registerXPathNamespace('a', self::NS_A);
+
+        $colors = [];
+        foreach (['background' => 'lt1', 'text' => 'dk1', 'accent' => 'accent1', 'muted' => 'dk2', 'surface' => 'lt2'] as $key => $slot) {
+            $node = $sx->xpath('//a:clrScheme/a:'.$slot)[0] ?? null;
+            $hex = $node === null ? null : $this->schemeHex($node);
+            if ($hex !== null) {
+                $colors[$key] = '#'.$hex;
+            }
+        }
+
+        $fonts = [];
+        foreach (['heading' => 'majorFont', 'body' => 'minorFont'] as $key => $slot) {
+            $latin = $sx->xpath('//a:fontScheme/a:'.$slot.'/a:latin')[0] ?? null;
+            $face = $latin === null ? '' : (string) $latin['typeface'];
+            if ($face !== '') {
+                $fonts[$key] = $face;
+            }
+        }
+        // Only a NAMED mono face. The writer records Consolas when a deck names
+        // none, and absent and Consolas write the same bytes, so reporting it
+        // would make a foreign deck gain a key on its first trip through ours
+        // and change its id: read must be a fixed point of write-then-read.
+        if ($this->monoTypeface !== '' && $this->monoTypeface !== 'Consolas') {
+            $fonts['mono'] = $this->monoTypeface;
+        }
+
+        $out = [];
+        if ($colors !== []) {
+            $out['colors'] = $colors;
+        }
+        if ($fonts !== []) {
+            $out['fonts'] = $fonts;
+        }
+
+        return $out;
+    }
+
+    /** A colour slot's sRGB value (or a system colour's last-known one), upper-case, or null. */
+    private function schemeHex(SimpleXMLElement $slot): ?string
+    {
+        $slot->registerXPathNamespace('a', self::NS_A);
+        $srgb = $slot->xpath('a:srgbClr')[0] ?? null;
+        $sys = $slot->xpath('a:sysClr')[0] ?? null;
+        $val = strtoupper($srgb !== null ? (string) $srgb['val'] : ($sys !== null ? (string) $sys['lastClr'] : ''));
+
+        return preg_match('/^[0-9A-F]{6}$/', $val) === 1 ? $val : null;
+    }
+
+    /**
+     * Design pixels (on the 1920 canvas the reader reports) from hundredths of
+     * a point, to 2 decimals; an int when whole, so 88 reads as 88, not 88.0.
+     */
+    private static function pxFromHundredths(int $hundredths): int|float
+    {
+        return self::wholeOrFloat(round($hundredths * 2 / 75, 2));
+    }
+
+    /** Design pixels from EMU (12700 per point), to 2 decimals. */
+    private static function pxFromEmu(int $emu): int|float
+    {
+        return self::wholeOrFloat(round($emu * 8 / 38100, 2));
+    }
+
+    private static function wholeOrFloat(float $v): int|float
+    {
+        return $v === floor($v) ? (int) $v : $v;
+    }
+
+    /**
+     * A `<a:solidFill>` as the deck writes colours: `#RRGGBB`, or
+     * `rgba(r,g,b,a)` when it carries an alpha below opaque. The alpha is
+     * formatted from the integer (thousandths of a percent), never through a
+     * float, so the three engines print the same digits.
+     */
+    private function solidFillColor(SimpleXMLElement $solidFill): ?string
+    {
+        $solidFill->registerXPathNamespace('a', self::NS_A);
+        $clr = $solidFill->xpath('a:srgbClr')[0] ?? null;
+        if ($clr === null) {
+            return null;
+        }
+        $hex = strtoupper((string) $clr['val']);
+        if (preg_match('/^[0-9A-F]{6}$/', $hex) !== 1) {
+            return null;
+        }
+        $clr->registerXPathNamespace('a', self::NS_A);
+        $alphaNode = $clr->xpath('a:alpha')[0] ?? null;
+        $alpha = $alphaNode !== null && ctype_digit((string) $alphaNode['val']) ? (int) $alphaNode['val'] : 100000;
+        if ($alpha >= 100000) {
+            return '#'.$hex;
+        }
+        $fraction = rtrim(str_pad((string) $alpha, 5, '0', STR_PAD_LEFT), '0');
+
+        return sprintf('rgba(%d,%d,%d,%s)', hexdec(substr($hex, 0, 2)), hexdec(substr($hex, 2, 2)), hexdec(substr($hex, 4, 2)), $fraction === '' ? '0' : '0.'.$fraction);
+    }
+
+    /** The first direct child of $parent with this a: local name. */
+    private function aChild(SimpleXMLElement $parent, string $name): ?SimpleXMLElement
+    {
+        foreach ($parent->children(self::NS_A) as $child) {
+            if ($child->getName() === $name) {
+                return $child;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * A shape's fill and outline, in the deck's keys. `noFill` is stated as
+     * `transparent`, because an absent `fill` writes the default tint and an
+     * absent `stroke` the theme accent: leaving them out would ADD paint.
+     *
+     * @return array<string, mixed>
+     */
+    private function shapePaint(SimpleXMLElement $sp): array
+    {
+        $spPr = null;
+        foreach ($sp->children(self::NS_P) as $child) {
+            if ($child->getName() === 'spPr') {
+                $spPr = $child;
+            }
+        }
+        if ($spPr === null) {
+            return [];
+        }
+
+        $out = [];
+        if ($this->aChild($spPr, 'noFill') !== null) {
+            $out['fill'] = 'transparent';
+        } elseif (($solid = $this->aChild($spPr, 'solidFill')) !== null && ($color = $this->solidFillColor($solid)) !== null) {
+            $out['fill'] = $color;
+        }
+
+        $ln = $this->aChild($spPr, 'ln');
+        if ($ln !== null) {
+            if ($this->aChild($ln, 'noFill') !== null) {
+                $out['stroke'] = 'transparent';
+            } elseif (($solid = $this->aChild($ln, 'solidFill')) !== null && ($color = $this->solidFillColor($solid)) !== null) {
+                $out['stroke'] = $color;
+                // attributes(), not $ln['w']: an element reached through
+                // children(NS_A) looks its attributes up in that namespace.
+                $w = (string) ($ln->attributes()['w'] ?? '');
+                if (ctype_digit($w)) {
+                    $out['strokeWidth'] = self::pxFromEmu((int) $w);
+                }
+                if ($this->aChild($ln, 'prstDash') !== null) {
+                    $out['dashed'] = true;
+                }
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * A text body's element-level style: what every run shares, plus the first
+     * paragraph's alignment and the box's vertical anchor. Code runs (the mono
+     * face) are not the element's style and are skipped.
+     *
+     * Bold and italic count only when EVERY text run has them; then they are
+     * the element's style and the markdown carries no markers for them.
+     *
+     * @return array<string, mixed>
+     */
+    private function textStyle(SimpleXMLElement $tBody, array $runs): array
+    {
+        $style = [];
+        $first = null;
+        foreach ($runs as $run) {
+            if ($run['text'] !== '' && ! $run['code']) {
+                $first = $run;
+                break;
+            }
+        }
+        if ($first !== null && $first['sz'] !== null) {
+            $style['fontSize'] = self::pxFromHundredths($first['sz']);
+        }
+        $text = array_values(array_filter($runs, static fn (array $r): bool => $r['text'] !== ''));
+        if ($text !== [] && array_reduce($text, static fn (bool $all, array $r): bool => $all && $r['b'], true)) {
+            $style['weight'] = 700;
+        }
+        if ($text !== [] && array_reduce($text, static fn (bool $all, array $r): bool => $all && $r['i'], true)) {
+            $style['italic'] = true;
+        }
+        if ($text !== [] && array_reduce($text, static fn (bool $all, array $r): bool => $all && $r['u'], true)) {
+            $style['underline'] = true;
+        }
+        if ($first !== null && $first['color'] !== null) {
+            $style['color'] = $first['color'];
+        }
+        if ($first !== null && $first['font'] !== null) {
+            $style['fontFamily'] = $first['font'];
+        }
+
+        $tBody->registerXPathNamespace('a', self::NS_A);
+        $algn = (string) (($tBody->xpath('a:p[1]/a:pPr')[0] ?? null)['algn'] ?? '');
+        $align = match ($algn) {
+            'ctr' => 'center',
+            'r' => 'right',
+            'just' => 'justify',
+            default => null,
+        };
+        if ($align !== null) {
+            $style['align'] = $align;
+        }
+        $anchor = (string) (($tBody->xpath('a:bodyPr')[0] ?? null)['anchor'] ?? '');
+        $vertical = match ($anchor) {
+            'ctr' => 'middle',
+            'b' => 'bottom',
+            default => null,
+        };
+        if ($vertical !== null) {
+            $style['verticalAlign'] = $vertical;
+        }
+
+        return $style;
     }
 
     private function readSlideSize(ZipArchive $zip): void
@@ -781,14 +1020,25 @@ final class PptxReader
         $tBody = $sp->xpath('.//p:txBody')[0] ?? null;
         $paragraphMarkdown = [];
         $anyDecoration = false;
+        $paragraphs = [];
         if ($tBody !== null) {
             $tBody->registerXPathNamespace('a', self::NS_A);
             foreach ($tBody->xpath('.//a:p') ?: [] as $p) {
-                $p->registerXPathNamespace('a', self::NS_A);
-                [$md, $decorated] = $this->paragraphToMarkdown($p);
-                $paragraphMarkdown[] = $md;
-                $anyDecoration = $anyDecoration || $decorated;
+                $paragraphs[] = $this->paragraphRuns($p);
             }
+        }
+        // Bold / italic shared by EVERY text run of the element are its style
+        // (style.weight / style.italic), so they carry no markers. Decided over
+        // the element rather than per paragraph: a bold paragraph inside an
+        // otherwise plain box used to come back with no bold at all.
+        $allRuns = array_merge([], ...array_column($paragraphs, 1));
+        $textRuns = array_filter($allRuns, static fn (array $r): bool => $r['text'] !== '');
+        $allBold = $textRuns !== [] && array_reduce($textRuns, static fn (bool $all, array $r): bool => $all && $r['b'], true);
+        $allItalic = $textRuns !== [] && array_reduce($textRuns, static fn (bool $all, array $r): bool => $all && $r['i'], true);
+        foreach ($paragraphs as [$isBullet, $runs]) {
+            [$md, $decorated] = $this->runsToMarkdown($isBullet, $runs, $allBold, $allItalic);
+            $paragraphMarkdown[] = $md;
+            $anyDecoration = $anyDecoration || $decorated;
         }
 
         // Preset geometry?
@@ -798,11 +1048,17 @@ final class PptxReader
         // Heuristic: if there's any text content, treat as text element.
         $hasText = !empty(array_filter($paragraphMarkdown, fn ($t) => $t !== ''));
         if ($hasText) {
-            return $base + [
+            $element = $base + [
                 'type' => 'text',
                 'content' => implode("\n", $paragraphMarkdown),
                 'format' => $anyDecoration ? 'markdown' : 'plain',
             ];
+            $style = $this->textStyle($tBody, $allRuns);
+            if ($style !== []) {
+                $element['style'] = $style;
+            }
+
+            return $element;
         }
 
         // Otherwise, if the shape has a known preset, emit a shape element.
@@ -816,7 +1072,7 @@ final class PptxReader
             default => null,
         };
         if ($shapeKind !== null) {
-            return $base + ['type' => 'shape', 'shape' => $shapeKind];
+            return $base + ['type' => 'shape', 'shape' => $shapeKind] + $this->shapePaint($sp);
         }
 
         return null;
@@ -965,60 +1221,43 @@ final class PptxReader
     }
 
     /**
-     * Convert a drawingML `<a:p>` element back into a single line of
-     * markdown source. Returns `[markdownLine, anyDecoration]`. The flag
-     * lets the caller decide whether to mark the whole text element as
-     * `format=markdown` (we only do so when at least one run carried
-     * mixed decoration or the paragraph was a bullet).
+     * A drawingML `<a:p>`'s bullet flag and runs, each with what the reader
+     * needs for markdown (text, b, i, code) and for the element's style
+     * (u, sz, color, font). `[isBullet, runs]`.
      *
-     * Heuristic for inline span emission:
-     *   - If every non-empty run is bold, we treat bold as the paragraph
-     *     default (it was set via the element's `style.weight`) and emit
-     *     no `**` markers. Same for italic.
-     *   - If runs are mixed (some bold, some not), `**` wraps only the
-     *     bold ones — the canonical markdown case.
-     *   - Code runs (Consolas / monospace font hint) always wrap in
-     *     backticks because that's how the writer encodes them.
-     *
-     * We intentionally do NOT try to reconstruct `# ATX headings` from
-     * run sizes — there's no reliable way to distinguish a hand-styled
-     * "large bold title" from a markdown-emitted `#` heading. Round-trip
-     * fidelity stops at inline spans.
-     *
-     * @return array{0: string, 1: bool}
+     * @return array{0: bool, 1: list<array<string, mixed>>}
      */
-    private function paragraphToMarkdown(SimpleXMLElement $p): array
+    private function paragraphRuns(SimpleXMLElement $p): array
     {
         $p->registerXPathNamespace('a', self::NS_A);
 
-        // Bullet?
-        $bu = $p->xpath('.//a:pPr/a:buChar');
-        $isBullet = !empty($bu);
+        $isBullet = !empty($p->xpath('.//a:pPr/a:buChar'));
 
-        $runs = $p->xpath('.//a:r') ?: [];
-        if (empty($runs)) {
-            return [$isBullet ? '- ' : '', $isBullet];
-        }
-
-        // First pass: collect (text, b, i, code) tuples + uniformity flags.
         $parsed = [];
-        $allBold = true;
-        $allItalic = true;
-        $anyNonEmpty = false;
-        foreach ($runs as $r) {
+        foreach ($p->xpath('.//a:r') ?: [] as $r) {
             $r->registerXPathNamespace('a', self::NS_A);
             $rPr = $r->xpath('a:rPr')[0] ?? null;
             $tNode = $r->xpath('a:t')[0] ?? null;
             $text = $tNode !== null ? (string) $tNode : '';
             $b = false;
             $i = false;
+            $u = false;
             $code = false;
+            $sz = null;
+            $color = null;
+            $font = null;
             if ($rPr !== null) {
+                $rPr->registerXPathNamespace('a', self::NS_A);
                 $b = ((string) ($rPr['b'] ?? '0')) === '1';
                 $i = ((string) ($rPr['i'] ?? '0')) === '1';
+                $u = ((string) ($rPr['u'] ?? 'none')) !== 'none';
+                $sz = ctype_digit((string) ($rPr['sz'] ?? '')) ? (int) $rPr['sz'] : null;
+                $solid = $this->aChild($rPr, 'solidFill');
+                $color = $solid !== null ? $this->solidFillColor($solid) : null;
                 $latin = $rPr->xpath('a:latin');
                 if (!empty($latin)) {
-                    $typeface = strtolower((string) $latin[0]['typeface']);
+                    $face = (string) $latin[0]['typeface'];
+                    $typeface = strtolower($face);
 
                     // Exact match against the typeface the deck RECORDED first,
                     // then the name sniff.
@@ -1038,19 +1277,46 @@ final class PptxReader
                         || str_contains($typeface, 'mono')
                         || str_contains($typeface, 'courier')) {
                         $code = true;
+                    } elseif ($face !== '') {
+                        $font = $face;
                     }
                 }
             }
-            if ($text !== '') {
+            $parsed[] = ['text' => $text, 'b' => $b, 'i' => $i, 'u' => $u, 'code' => $code, 'sz' => $sz, 'color' => $color, 'font' => $font];
+        }
+
+        return [$isBullet, $parsed];
+    }
+
+    /**
+     * One paragraph's runs back into a single line of markdown source.
+     * Returns `[markdownLine, anyDecoration]`. The flag lets the caller decide
+     * whether to mark the whole text element as `format=markdown` (we only do
+     * so when at least one run carried decoration or the paragraph was a
+     * bullet).
+     *
+     * Heuristic for inline span emission:
+     *   - Bold shared by every text run of the ELEMENT ($allBold) is the
+     *     element's `style.weight` and gets no `**` markers. Same for italic.
+     *   - Otherwise `**` wraps the bold runs — the canonical markdown case.
+     *   - Code runs (the mono font) always wrap in backticks because that's
+     *     how the writer encodes them.
+     *
+     * We intentionally do NOT try to reconstruct `# ATX headings` from
+     * run sizes — there's no reliable way to distinguish a hand-styled
+     * "large bold title" from a markdown-emitted `#` heading. Round-trip
+     * fidelity stops at inline spans.
+     *
+     * @param  list<array<string, mixed>>  $parsed
+     * @return array{0: string, 1: bool}
+     */
+    private function runsToMarkdown(bool $isBullet, array $parsed, bool $allBold, bool $allItalic): array
+    {
+        $anyNonEmpty = false;
+        foreach ($parsed as $run) {
+            if ($run['text'] !== '') {
                 $anyNonEmpty = true;
-                if (!$b) {
-                    $allBold = false;
-                }
-                if (!$i) {
-                    $allItalic = false;
-                }
             }
-            $parsed[] = ['text' => $text, 'b' => $b, 'i' => $i, 'code' => $code];
         }
         if (!$anyNonEmpty) {
             return [$isBullet ? '- ' : '', $isBullet];

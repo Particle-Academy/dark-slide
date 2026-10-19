@@ -210,7 +210,22 @@ Whether row 0 is a header is declared by `<a:tblPr firstRow="1">`. Assuming it
 promoted a row of DATA to column labels and dropped it from the rows. Every
 `metadataGrid` and `kpiBand` is a header-less table, so this is the common case.
 
-### 8. The rel-id collision is reproduced, not fixed
+### 8. A read must be a fixed point of write-then-read
+
+The reader recovers the theme, a text element's style and a shape's paint
+(0.17), and `ReaderKeepsStylingTest` writes what it read and demands the same
+slide and theme parts. Two rules keep that true, and both are easy to undo:
+
+- **State "none".** A shape with `<a:noFill/>` reads as `fill: "transparent"`,
+  never as an absent key: an absent `fill` writes the default tint, so leaving
+  it out ADDS paint on the next write.
+- **Do not report what the writer would add anyway.** The writer records
+  Consolas as the mono face when a deck names none, so the reader reports
+  `fonts.mono` only when it is something else. Reporting the default made a
+  foreign deck gain a key on its first trip through ours and change its id,
+  which `ReaderIsPureTest`'s foreign-fixture case caught.
+
+### 9. The rel-id collision is reproduced, not fixed
 
 Image relationship ids come from a **global** media counter while a slide's own
 rels start at `rId1`, so one image on one slide already emits two
