@@ -84,6 +84,9 @@ final class PptxWriter
     ];
 
     /** Series fill palette (hex, no #) used when no theme accent is given. */
+    /** The chart being written's own palette (ECharts option.color), or [] for the default. */
+    private array $chartPalette = [];
+
     private const CHART_PALETTE = ['8B5CF6', 'EC4899', '06B6D4', 'F59E0B', '10B981', '3B82F6', 'EF4444', 'A855F7'];
 
     /** Counter for media file names. Reset per write(). */
@@ -2279,6 +2282,7 @@ final class PptxWriter
     private function buildChartPart(array $spec): string
     {
         $kind = $spec['kind'];
+        $this->chartPalette = $spec['palette'] ?? [];
         $plot = match ($kind) {
             'bar' => $this->buildBarChartXml($spec),
             'line' => $this->buildLineChartXml($spec),
@@ -2323,7 +2327,8 @@ final class PptxWriter
                 . '<c:idx val="' . $idx . '"/>'
                 . '<c:order val="' . $idx . '"/>'
                 . $this->chartSeriesName($series, $idx)
-                . $this->chartSeriesFill($idx)
+                . $this->chartSeriesFill($idx, $series)
+                . $this->chartPointColors($series, 'bar')
                 . $this->chartDataLabels($series, 'outEnd')
                 . $this->chartCatRef($spec['categories'], $series['values'])
                 . $this->chartValRef($series['values'])
@@ -2362,7 +2367,8 @@ final class PptxWriter
                 . '<c:idx val="' . $idx . '"/>'
                 . '<c:order val="' . $idx . '"/>'
                 . $this->chartSeriesName($series, $idx)
-                . $this->chartSeriesLine($idx)
+                . $this->chartSeriesLine($idx, $series)
+                . $this->chartPointColors($series, $isArea ? 'area' : 'line')
                 . $this->chartDataLabels($series, $isArea ? null : 't')
                 . $this->chartCatRef($spec['categories'], $series['values'])
                 . $this->chartValRef($series['values'])
@@ -2404,12 +2410,13 @@ final class PptxWriter
         $values = is_array($series['values'] ?? null) ? $series['values'] : [];
         $categories = $spec['categories'];
 
+        $own = array_column(is_array($series['pointColors'] ?? null) ? $series['pointColors'] : [], 'color', 'index');
         $dPts = '';
         foreach ($values as $idx => $_) {
             $dPts .= '<c:dPt>'
                 . '<c:idx val="' . $idx . '"/>'
                 . '<c:bubble3D val="0"/>'
-                . '<c:spPr><a:solidFill><a:srgbClr val="' . $this->chartColor($idx) . '"/></a:solidFill></c:spPr>'
+                . '<c:spPr><a:solidFill><a:srgbClr val="' . ($own[$idx] ?? $this->chartColor($idx)) . '"/></a:solidFill></c:spPr>'
                 . '</c:dPt>';
         }
 
@@ -2527,15 +2534,37 @@ final class PptxWriter
     }
 
     /** Solid-fill `<c:spPr>` for a bar/area series, colored from the palette. */
-    private function chartSeriesFill(int $idx): string
+    private function chartSeriesFill(int $idx, array $series = []): string
     {
-        return '<c:spPr><a:solidFill><a:srgbClr val="' . $this->chartColor($idx) . '"/></a:solidFill></c:spPr>';
+        return '<c:spPr><a:solidFill><a:srgbClr val="' . ($series['color'] ?? $this->chartColor($idx)) . '"/></a:solidFill></c:spPr>';
+    }
+
+    /**
+     * A point coloured on its own (ECharts data[i].itemStyle.color): a `<c:dPt>`
+     * after the series' fill and before its labels, as CT_BarSer / CT_LineSer /
+     * CT_AreaSer order them. Nothing at all when no point names a colour.
+     *
+     * @param  array<string, mixed>  $series
+     */
+    private function chartPointColors(array $series, string $shape): string
+    {
+        $out = '';
+        foreach (is_array($series['pointColors'] ?? null) ? $series['pointColors'] : [] as $point) {
+            $solid = '<a:solidFill><a:srgbClr val="' . $point['color'] . '"/></a:solidFill>';
+            $out .= '<c:dPt><c:idx val="' . $point['index'] . '"/>' . match ($shape) {
+                'line' => '<c:marker><c:symbol val="circle"/><c:size val="7"/><c:spPr>' . $solid . '<a:ln>' . $solid . '</a:ln></c:spPr></c:marker><c:bubble3D val="0"/>',
+                'area' => '<c:bubble3D val="0"/><c:spPr>' . $solid . '</c:spPr>',
+                default => '<c:invertIfNegative val="0"/><c:bubble3D val="0"/><c:spPr>' . $solid . '</c:spPr>',
+            } . '</c:dPt>';
+        }
+
+        return $out;
     }
 
     /** Line `<c:spPr>` for a line/area series, colored from the palette. */
-    private function chartSeriesLine(int $idx): string
+    private function chartSeriesLine(int $idx, array $series = []): string
     {
-        return '<c:spPr><a:ln w="28575"><a:solidFill><a:srgbClr val="' . $this->chartColor($idx) . '"/></a:solidFill></a:ln></c:spPr>';
+        return '<c:spPr><a:ln w="28575"><a:solidFill><a:srgbClr val="' . ($series['color'] ?? $this->chartColor($idx)) . '"/></a:solidFill></a:ln></c:spPr>';
     }
 
     /**
@@ -2601,6 +2630,9 @@ final class PptxWriter
     /** Pick a series color: accent for the first series, palette thereafter. */
     private function chartColor(int $idx): string
     {
+        if ($this->chartPalette !== []) {
+            return $this->chartPalette[$idx % count($this->chartPalette)];
+        }
         if ($idx === 0) {
             return $this->themeAccent;
         }

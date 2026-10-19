@@ -97,3 +97,19 @@ it('returns nothing for a clean slide, and nothing for a deck with no slides', f
     ])))->toBe([])
         ->and(Agent::lint(['id' => 'd', 'title' => 'D', 'theme' => ['name' => 't'], 'slides' => []]))->toBe([]);
 });
+
+it('names markdown markers in a box that is not markdown, which print as typed', function () {
+    // A launch deck reviewed with "**The problem.**" on three slides: the agent
+    // wrote markdown and left format at its default, so the asterisks printed.
+    $findings = Agent::lint(lintDeck([
+        ['id' => 'lead', 'type' => 'text', 'x' => 0.1, 'y' => 0.1, 'w' => 0.8, 'h' => 0.3, 'content' => "**The problem.** Reconciliation is manual.", 'style' => ['fontSize' => 40]],
+        ['id' => 'head', 'type' => 'shape', 'shape' => 'rect', 'x' => 0.1, 'y' => 0.5, 'w' => 0.3, 'h' => 0.1, 'content' => "# Owners"],
+        ['id' => 'fine', 'type' => 'text', 'x' => 0.5, 'y' => 0.5, 'w' => 0.4, 'h' => 0.3, 'content' => '**Adoption** at 90 days', 'format' => 'markdown', 'style' => ['fontSize' => 40]],
+        ['id' => 'math', 'type' => 'text', 'x' => 0.1, 'y' => 0.85, 'w' => 0.3, 'h' => 0.1, 'content' => '2 * 3 = 6, #1 in EMEA', 'style' => ['fontSize' => 40]],
+    ]));
+
+    expect($findings)->toBe([
+        ['code' => 'literal-markdown', 'slide' => 1, 'element' => 'lead', 'message' => 'This text uses markdown (**bold** or a # heading) but its format is not "markdown", so the markers print as typed. Set "format": "markdown", or remove the markers.'],
+        ['code' => 'literal-markdown', 'slide' => 1, 'element' => 'head', 'message' => 'This text uses markdown (**bold** or a # heading) but its format is not "markdown", so the markers print as typed. Set "format": "markdown", or remove the markers.'],
+    ]);
+});

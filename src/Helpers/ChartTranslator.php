@@ -25,8 +25,8 @@ namespace DarkSlide\Helpers;
  *
  * Pure data, no runtime dependencies.
  *
- * @phpstan-type ChartSeries array{type: string, name: string, values: list<float>, smooth: bool, area: bool, points: list<array{x: float, y: float}>, labels: bool}
- * @phpstan-type ChartSpec array{kind: string, title: string, categories: list<string>, series: list<ChartSeries>, legend: bool}
+ * @phpstan-type ChartSeries array{type: string, name: string, values: list<float>, smooth: bool, area: bool, points: list<array{x: float, y: float}>, labels: bool, color: ?string, pointColors: list<array{index: int, color: string}>}
+ * @phpstan-type ChartSpec array{kind: string, title: string, categories: list<string>, series: list<ChartSeries>, legend: bool, palette: list<string>}
  */
 final class ChartTranslator
 {
@@ -93,7 +93,40 @@ final class ChartTranslator
             'categories' => $categories,
             'series' => $series,
             'legend' => self::wantsLegend($option),
+            'palette' => self::palette($option),
         ];
+    }
+
+    /**
+     * `option.color`, ECharts' palette: the colours series take in turn (slices,
+     * for a pie). Entries that are not #RRGGBB are skipped.
+     *
+     * @param  array<string, mixed>  $option
+     * @return list<string>  upper-case hex, no '#'
+     */
+    private static function palette(array $option): array
+    {
+        $out = [];
+        foreach (is_array($option['color'] ?? null) ? array_values($option['color']) : [] as $color) {
+            $hex = self::hexColor($color);
+            if ($hex !== null) {
+                $out[] = $hex;
+            }
+        }
+
+        return $out;
+    }
+
+    /** `#RRGGBB` as upper-case hex without the '#', or null. */
+    private static function hexColor(mixed $color): ?string
+    {
+        return is_string($color) && preg_match('/^#([0-9A-Fa-f]{6})$/', $color, $m) === 1 ? strtoupper($m[1]) : null;
+    }
+
+    /** `itemStyle.color` of a series or a data item, or null. */
+    private static function itemColor(mixed $holder): ?string
+    {
+        return is_array($holder) && is_array($holder['itemStyle'] ?? null) ? self::hexColor($holder['itemStyle']['color'] ?? null) : null;
     }
 
     /**
@@ -187,7 +220,12 @@ final class ChartTranslator
 
         $values = [];
         $points = [];
-        foreach ($data as $point) {
+        $pointColors = [];
+        foreach (array_values($data) as $i => $point) {
+            $pointColor = $type === 'scatter' ? null : self::itemColor($point);
+            if ($pointColor !== null) {
+                $pointColors[] = ['index' => $i, 'color' => $pointColor];
+            }
             if ($type === 'scatter') {
                 $xy = self::scatterPoint($point);
                 if ($xy !== null) {
@@ -217,6 +255,9 @@ final class ChartTranslator
             'points' => $points,
             // ECharts' `label.show`: the series' values drawn on the chart.
             'labels' => is_array($raw['label'] ?? null) && ($raw['label']['show'] ?? false) === true,
+            // ECharts' itemStyle.color: the series' own colour, and a point's.
+            'color' => self::itemColor($raw),
+            'pointColors' => $pointColors,
         ];
     }
 

@@ -30,7 +30,7 @@ use DarkSlide\Helpers\DesignUnits;
  *
  * `{code, slide (1-based), element (id), message}`, in slide order, per-element
  * checks first and overlaps after. Codes: `text-overflow`, `overlap`,
- * `off-slide`, `kpi-overflow`, `small-text`. Every number in a message is rounded
+ * `off-slide`, `kpi-overflow`, `small-text`, `literal-markdown`. Every number in a message is rounded
  * UP to its shown precision, so the three engines print the same text.
  *
  * The same rules, messages and cases are in `@particle-academy/dark-slide` and
@@ -111,6 +111,15 @@ final class Lint
                             self::num($font), self::num(floor($pt * 10) / 10), self::num(ceil(self::MIN_PT * $canvasW / 720)),
                         ));
                     }
+                }
+
+                // Markdown in a box that is not markdown prints its markers as
+                // typed: "**The problem.**" on the slide, asterisks and all.
+                if (($type === 'text' || $type === 'shape') && is_string($el['content'] ?? null)
+                    && ($el['format'] ?? 'plain') !== 'markdown'
+                    && preg_match('/\*\*[^*\n]+\*\*|(^|\n)#{1,6}[ \t]/', $el['content']) === 1) {
+                    $findings[] = self::finding('literal-markdown', $slideNo, $id,
+                        'This text uses markdown (**bold** or a # heading) but its format is not "markdown", so the markers print as typed. Set "format": "markdown", or remove the markers.');
                 }
 
                 if ($type === 'kpiBand') {

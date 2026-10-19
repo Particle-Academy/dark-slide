@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-19
+
+### Added
+
+- **Chart colours, as ECharts states them.** Charts took every colour from the
+  writer's own palette and read none of the option's, so an agent could not
+  highlight the bar a slide was about, and a pie's second slice was a stock
+  hot pink whatever the brand. Reviewers marked both down on every comparison
+  deck. Three ECharts keys are honoured now:
+  - `option.color`: the palette, series by series (slice by slice for a pie);
+  - `series[].itemStyle.color`: one series' colour;
+  - `series[].data[i].itemStyle.color`: one point, the bar, line marker or
+    slice the slide is about (a DrawingML data point).
+  All three are published in the deck schema.
+- **`Agent::lint` names markdown that will print as typed** (`literal-markdown`):
+  `**bold**` or a `# heading` in a text or shape whose `format` is not
+  `"markdown"`. A launch deck reviewed with "**The problem.**" on three slides
+  is what this catches.
+- **Nothing to do**: a chart that names no colour writes the bytes it always did.
+
 ## [0.17.0] - 2026-10-19
 
 ### Changed
