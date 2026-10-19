@@ -167,6 +167,13 @@ at one defect.
 
 `Agent::validateAndRepair($schema)` returns `['ok' => bool, 'schema' => array, 'errors' => list]` — wire it into your LLM tool to give the agent structured feedback on its emitted decks. Mirrors holy-sheet's pattern.
 
+## Agent guide
+
+Building a deck with an LLM? `agent-guide/professional-decks.md` (also `DarkSlide\Agent::guide()`)
+is the guide to give the model alongside the JSON schema: the bar a professional
+deck meets, the schema idioms that reach it, and the failures seen in real
+agent builds. It works with any agent loop.
+
 ## License
 
 MIT

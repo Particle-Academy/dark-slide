@@ -300,4 +300,21 @@ final class Agent
     {
         return DeckOpSchema::jsonSchema();
     }
+
+    /**
+     * The agent guide: what makes this kind of file professional, and the schema
+     * idioms that produce it, distilled from rubric-judged builds. Give it to a
+     * model with the schema; it works with any agent loop. The same bytes ship in
+     * the Node and Python packages (each pins the hash).
+     */
+    public static function guide(): string
+    {
+        $path = dirname(__DIR__).'/agent-guide/professional-decks.md';
+        $text = is_file($path) ? file_get_contents($path) : false;
+        if ($text === false) {
+            throw new \RuntimeException('[dark-slide] agent-guide/professional-decks.md is missing from this install.');
+        }
+
+        return $text;
+    }
 }
