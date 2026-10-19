@@ -2644,7 +2644,9 @@ final class PptxWriter
         $baseItalic = !empty($style['italic']) ? ' i="1"' : '';
         $baseUnderline = !empty($style['underline']) ? ' u="sng"' : '';
         $align = $this->alignToAlgn($style['align'] ?? 'left');
-        [$colorHex, ] = Color::parse((string) ($style['color'] ?? '#0F172A'), '0F172A');
+        // Unstyled text takes the theme's text colour, as fancy-slides draws it.
+        // A fixed #0F172A here made every unstyled box invisible on a dark theme.
+        [$colorHex, ] = Color::parse((string) ($style['color'] ?? $this->deckTheme['colors']['text'] ?? '#0F172A'), '0F172A');
         $fontFamily = isset($style['fontFamily']) ? '<a:latin typeface="' . Xml::attr((string) $style['fontFamily']) . '"/>' : '';
         $anchor = match ($style['verticalAlign'] ?? 'top') {
             'middle' => 't="ctr"',
