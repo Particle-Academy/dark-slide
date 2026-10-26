@@ -4,11 +4,10 @@ declare(strict_types=1);
 
 namespace DarkSlide\Reader;
 
+use DarkSlide\Archive\SourceArchive;
 use DarkSlide\Helpers\Emu;
 use HashContext;
-use RuntimeException;
 use SimpleXMLElement;
-use ZipArchive;
 
 /**
  * @phpstan-type Slide array<string, mixed>
@@ -69,8 +68,8 @@ final class PptxReader
      */
     private string $monoTypeface = '';
 
-    /** ZipArchive being read; held during a single read() call so parsePic can resolve media. */
-    private ?ZipArchive $currentZip = null;
+    /** Validated parts held during one read so parsePic can resolve media. */
+    private ?SourceArchive $currentZip = null;
 
 
     /**
@@ -100,15 +99,7 @@ final class PptxReader
      */
     public function read(string $path): array
     {
-        if (!is_file($path)) {
-            throw new RuntimeException("File not found: {$path}");
-        }
-        $bytes = file_get_contents($path);
-        if ($bytes === false) {
-            throw new RuntimeException("Could not read file: {$path}");
-        }
-
-        return $this->fromBytes($bytes);
+        return $this->fromArchive(SourceArchive::fromPath($path));
     }
 
     /**
@@ -116,22 +107,16 @@ final class PptxReader
      */
     public function fromBytes(string $bytes): array
     {
+        return $this->fromArchive(SourceArchive::open($bytes));
+    }
+
+    private function fromArchive(SourceArchive $zip): array
+    {
         // Everything this read returns is derived from these bytes, here or
         // below. The counters start over on every call because one reader
         // instance may be handed a second file.
         $this->slideNumber = 0;
         $this->slideFallbackIds = 0;
-
-        $tmp = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR)
-            . DIRECTORY_SEPARATOR
-            . 'dark-slide-read-' . bin2hex(random_bytes(8));
-        file_put_contents($tmp, $bytes);
-
-        $zip = new ZipArchive();
-        if ($zip->open($tmp) !== true) {
-            @unlink($tmp);
-            throw new RuntimeException('Could not open zip archive.');
-        }
 
         try {
             $this->currentZip = $zip;
@@ -142,17 +127,18 @@ final class PptxReader
             $deck['id'] = 'imported-' . $this->contentDigest($deck);
         } finally {
             $this->currentZip = null;
-            $zip->close();
-            @unlink($tmp);
         }
 
         return $deck;
     }
 
-    /**
-     * @return array<string, mixed>
-     */
-    private function extract(ZipArchive $zip): array
+    private function part(SourceArchive $zip, string $name): string|false
+    {
+        return $zip->read($name) ?? false;
+    }
+
+    /** @return array<string, mixed> */
+    private function extract(SourceArchive $zip): array
     {
         $deck = [
             // Filled in by fromBytes() once the deck is complete — the digest is
@@ -176,18 +162,18 @@ final class PptxReader
         }
 
         // Walk the presentation rel list in order to find slide ids.
-        $presentationRels = $zip->getFromName('ppt/_rels/presentation.xml.rels');
+        $presentationRels = $this->part($zip, 'ppt/_rels/presentation.xml.rels');
         if ($presentationRels === false) {
             return $deck;
         }
         $slideTargets = $this->extractSlideTargets($presentationRels);
 
         foreach ($slideTargets as $i => $slideTarget) {
-            $slideXml = $zip->getFromName('ppt/' . $slideTarget);
+            $slideXml = $this->part($zip, 'ppt/' . $slideTarget);
             if ($slideXml === false) {
                 continue;
             }
-            $slideRels = $zip->getFromName('ppt/' . dirname($slideTarget) . '/_rels/' . basename($slideTarget) . '.rels') ?: '';
+            $slideRels = $this->part($zip, 'ppt/' . dirname($slideTarget) . '/_rels/' . basename($slideTarget) . '.rels') ?: '';
             $notes = $this->readNotesFor($zip, $slideRels);
             $this->currentSlideRels = $this->parseSlideRels($slideRels, $slideTarget);
             $this->slideNumber = $i + 1;
@@ -292,9 +278,9 @@ final class PptxReader
      * built, the element is one attribute deep, and a theme part that does not
      * carry the extension is the common case rather than an error.
      */
-    private function readMonoTypeface(ZipArchive $zip): string
+    private function readMonoTypeface(SourceArchive $zip): string
     {
-        $xml = $zip->getFromName('ppt/theme/theme1.xml');
+        $xml = $this->part($zip, 'ppt/theme/theme1.xml');
         if ($xml === false) {
             return '';
         }
@@ -315,9 +301,9 @@ final class PptxReader
      *
      * @return array{colors?: array<string, string>, fonts?: array<string, string>}
      */
-    private function readTheme(ZipArchive $zip): array
+    private function readTheme(SourceArchive $zip): array
     {
-        $xml = $zip->getFromName('ppt/theme/theme1.xml');
+        $xml = $this->part($zip, 'ppt/theme/theme1.xml');
         $sx = $xml === false || stripos($xml, '<!DOCTYPE') !== false ? false : @simplexml_load_string($xml);
         if ($sx === false) {
             return [];
@@ -542,12 +528,12 @@ final class PptxReader
         return $style;
     }
 
-    private function readSlideSize(ZipArchive $zip): void
+    private function readSlideSize(SourceArchive $zip): void
     {
         $this->slideWidthEmu = Emu::DEFAULT_SLIDE_WIDTH;
         $this->slideHeightEmu = Emu::DEFAULT_SLIDE_HEIGHT;
 
-        $xml = $zip->getFromName('ppt/presentation.xml');
+        $xml = $this->part($zip, 'ppt/presentation.xml');
         if ($xml === false || ! preg_match('/<p:sldSz\b[^>]*>/', $xml, $tag)) {
             return;
         }
@@ -578,9 +564,9 @@ final class PptxReader
      *
      * @return list<array{typeface: string, variants: list<string>}>
      */
-    private function readEmbeddedFonts(ZipArchive $zip): array
+    private function readEmbeddedFonts(SourceArchive $zip): array
     {
-        $xml = $zip->getFromName('ppt/presentation.xml');
+        $xml = $this->part($zip, 'ppt/presentation.xml');
         if ($xml === false || ! preg_match('/<p:embeddedFontLst>(.*?)<\/p:embeddedFontLst>/s', $xml, $list)) {
             return [];
         }
@@ -601,9 +587,9 @@ final class PptxReader
         return $fonts;
     }
 
-    private function readCoreTitle(ZipArchive $zip): ?string
+    private function readCoreTitle(SourceArchive $zip): ?string
     {
-        $xml = $zip->getFromName('docProps/core.xml');
+        $xml = $this->part($zip, 'docProps/core.xml');
         if ($xml === false) {
             return null;
         }
@@ -620,7 +606,7 @@ final class PptxReader
         return null;
     }
 
-    private function readNotesFor(ZipArchive $zip, string $slideRelsXml): ?string
+    private function readNotesFor(SourceArchive $zip, string $slideRelsXml): ?string
     {
         if ($slideRelsXml === '') {
             return null;
@@ -638,7 +624,7 @@ final class PptxReader
         foreach ($sx->xpath('//r:Relationship') ?: [] as $r) {
             if (str_ends_with((string) $r['Type'], '/notesSlide')) {
                 $target = (string) $r['Target'];
-                $notesXml = $zip->getFromName('ppt/' . ltrim(str_replace('../', '', $target), '/'));
+                $notesXml = $this->part($zip, 'ppt/' . ltrim(str_replace('../', '', $target), '/'));
                 if ($notesXml === false) {
                     return null;
                 }
@@ -821,7 +807,7 @@ final class PptxReader
         if ($this->currentZip === null) {
             return null;
         }
-        $bytes = $this->currentZip->getFromName($archivePath);
+        $bytes = $this->part($this->currentZip, $archivePath);
         if ($bytes === false) {
             return null;
         }
@@ -1298,7 +1284,7 @@ final class PptxReader
         $ref = $gf->xpath('.//c:chart')[0] ?? null;
         $rid = $ref === null ? '' : (string) ($ref->attributes(self::NS_R)['id'] ?? '');
         $target = $this->currentSlideRels[$rid]['target'] ?? null;
-        $xml = $target !== null && $this->currentZip !== null ? $this->currentZip->getFromName($target) : false;
+        $xml = $target !== null && $this->currentZip !== null ? $this->part($this->currentZip, $target) : false;
         $sx = $xml === false || stripos($xml, '<!DOCTYPE') !== false ? false : @simplexml_load_string($xml);
         if ($sx === false) {
             return null;

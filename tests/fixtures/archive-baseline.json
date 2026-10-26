@@ -1,0 +1,8 @@
+{
+    "tests/fixtures/foreign-libreoffice.pptx": {
+        "sourceSha256": "5034513ca0b600fd0695bc832075e77f612c09b0fb866ed51a7048b023099459",
+        "entries": 36,
+        "payloadsSha256": "2cdba8122394516992fbedd80831f2e8f841d35f4a17699797be9b7789d628e0",
+        "projectionSha256": "29c4f4eb8184aae101be1b23d1f2bfbe8e435a81cc53952dfa8a0305b827fe95"
+    }
+}

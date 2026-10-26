@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Security
+
+- Bound PPTX archive and file reads before allocation and reject excessive
+  expansion, duplicate or unsafe member names, corrupt sizes/CRC, inconsistent
+  ZIP metadata and truncated archives with `DarkSlide\Exceptions\ArchiveRefused`.
+  Both `Agent::read()` and `PptxReader::fromBytes()` use the strict reader.
+  Valid fixture payloads and reader projections remain unchanged; no new dependency.
+
 ## [0.21.0] - 2026-10-19
 
 ### Changed

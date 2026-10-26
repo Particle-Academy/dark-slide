@@ -12,6 +12,11 @@ Google Slides, and LibreOffice Impress.
 
 ## Why
 
+Archive reads enforce limits of 64 MiB input/part, 256 MiB expanded data,
+16,384 members and 1000:1 expansion. Corrupt, duplicate, unsafe or unsupported
+ZIP entries raise `DarkSlide\Exceptions\ArchiveRefused` with a constant `reason`.
+These archive checks do not promise support for every PowerPoint XML construct.
+
 Sister project to [`holy-sheet`](https://github.com/Particle-Academy/holy-sheet)
 (XLSX writer). The two share an "agent emits JSON, PHP writes a real
 document" pattern:
