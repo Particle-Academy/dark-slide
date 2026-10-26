@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.21.1] - 2026-10-26
+
 ### Security
 
 - Bound PPTX archive and file reads before allocation and reject excessive
