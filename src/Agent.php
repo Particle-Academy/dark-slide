@@ -194,6 +194,29 @@ final class Agent
     }
 
     /**
+     * Turn a PowerPoint `.potx` template into its `.pptx` twin, or back. `$to`
+     * is `document`, `template`, or null to flip whichever it is.
+     *
+     * Only the main part's content-type value in `[Content_Types].xml` is
+     * rewritten; every other zip member is copied as its original record, byte
+     * for byte. No reader or writer is in the path, so nothing is reflowed.
+     *
+     * Macro-enabled packages (.potm, .pptm) are refused, never converted, and
+     * so are OpenDocument presentations: dark-slide does not read them.
+     *
+     * @throws \DarkSlide\Exceptions\OfficeTemplateRefused
+     * @throws \DarkSlide\Exceptions\ArchiveRefused
+     */
+    public static function convertTemplate(string $bytesOrPath, ?string $to = null): string
+    {
+        // A NUL byte means bytes; so does anything too long to be a path.
+        $isPath = ! str_contains($bytesOrPath, "\0") && strlen($bytesOrPath) <= 4096 && is_file($bytesOrPath);
+        $bytes = $isPath ? \DarkSlide\Archive\SourceArchive::fromPath($bytesOrPath)->toBytes() : $bytesOrPath;
+
+        return \DarkSlide\Archive\OfficeTemplate::convert($bytes, $to);
+    }
+
+    /**
      * Layout problems that will show on the slides: text that will wrap past its
      * box, text running into another element, boxes off the slide, KPI values too
      * wide for their cells, text too small to read when projected. Read-only.

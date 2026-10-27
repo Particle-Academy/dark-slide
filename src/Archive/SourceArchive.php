@@ -15,7 +15,12 @@ final class SourceArchive
         'maxExpandedBytes' => 268435456, 'maxCompressionRatio' => 1000,
     ];
 
-    private function __construct(private readonly string $original, private readonly array $parts) {}
+    private function __construct(
+        private readonly string $original,
+        private readonly array $parts,
+        private readonly array $records = [],
+        private readonly string $comment = '',
+    ) {}
 
     public static function fromPath(string $path, array $limits = []): self
     {
@@ -56,9 +61,9 @@ final class SourceArchive
         if (strlen($bytes) > $limits['maxArchiveBytes']) {
             throw new ArchiveRefused('archive_limit');
         }
-        $records = self::index($bytes, $limits);
+        [$records, $comment] = self::index($bytes, $limits);
 
-        return self::decode($bytes, $records);
+        return self::decode($bytes, $records, $comment);
     }
 
     private static function limits(array $limits): array
@@ -72,7 +77,7 @@ final class SourceArchive
         return $limits + self::DEFAULTS;
     }
 
-    private static function decode(string $bytes, array $records): self
+    private static function decode(string $bytes, array $records, string $comment): self
     {
         $path = tempnam(sys_get_temp_dir(), 'office_source_');
         if ($path === false) {
@@ -101,7 +106,7 @@ final class SourceArchive
                 $parts[$record['name']] = $part;
             }
 
-            return new self($bytes, $parts);
+            return new self($bytes, $parts, $records, $comment);
         } finally {
             if ($opened) {
                 $zip->close();
@@ -123,6 +128,25 @@ final class SourceArchive
     public function toBytes(): string
     {
         return $this->original;
+    }
+
+    /**
+     * Verified member records in central-directory order: where each local
+     * record starts and ends in {@see toBytes()} (data descriptor included),
+     * and where its central record sits. Lets a caller copy a member as raw
+     * bytes, which is what keeps a part byte-identical without re-encoding it.
+     *
+     * @return list<array{name: string, size: int, crc: int, local: int, finish: int, central: int, centralLength: int, flags: int, method: int, localExtra: int}>
+     */
+    public function entries(): array
+    {
+        return $this->records;
+    }
+
+    /** The archive comment, verbatim. */
+    public function comment(): string
+    {
+        return $this->comment;
     }
 
     private static function index(string $bytes, array $limits): array
@@ -211,7 +235,9 @@ final class SourceArchive
             if (($flags & 8) !== 0) {
                 $finish = self::descriptor($bytes, $finish, self::u32($bytes, $end + 16), $crc, $compressed, $size);
             }
-            $records[] = ['name' => $name, 'size' => $size, 'crc' => $crc];
+            $records[] = ['name' => $name, 'size' => $size, 'crc' => $crc, 'local' => $local, 'finish' => $finish,
+                'central' => $at, 'centralLength' => 46 + $nameLength + $extraLength + $commentLength,
+                'flags' => $flags, 'method' => $method, 'localExtra' => $localExtra];
             $regions[] = [$local, $finish];
             $at += 46 + $nameLength + $extraLength + $commentLength;
         }
@@ -227,7 +253,7 @@ final class SourceArchive
             $previous = $finish;
         }
 
-        return $records;
+        return [$records, substr($bytes, $end + 22, self::u16($bytes, $end + 20))];
     }
 
     private static function name(string $name, int $flags): void

@@ -168,6 +168,32 @@ at one defect.
 - **Syntax-highlighted code blocks**. The `code` element now ships one `<a:r>` per token, colored by kind (keyword / string / comment / number / builtin / punctuation). Pure-PHP tokenizer, zero third-party deps. Languages: `javascript`, `typescript`, `jsx`, `tsx`, `php`, `json`, `bash`, `css`, `python`, `html`.
 - **Reader fidelity for v0.2 features**. Tables, gradients, embedded images, and inline bold/italic/code spans now round-trip back to the Deck schema.
 
+## PowerPoint templates (.potx)
+
+A `.potx` is a `.pptx` whose main part is declared a template.
+`Agent::read()` reads one exactly as its twin and adds
+`"sourceKind": "template"` (the deck `id` is unchanged by it: it digests
+content, and the content is the same). A presentation read has no
+`sourceKind` key.
+
+```php
+Agent::read('brand.potx');            // [..., 'sourceKind' => 'template']
+Agent::convertTemplate('brand.potx'); // .pptx bytes ('document' | 'template' | null = flip)
+```
+
+```
+vendor/bin/dark-slide template:convert brand.potx brand.pptx
+vendor/bin/dark-slide template:convert deck.pptx deck.potx --to=template
+```
+
+Conversion rewrites only the content-type value in `[Content_Types].xml`;
+every other zip member is copied as its original record, byte for byte.
+Refused with `DarkSlide\Exceptions\OfficeTemplateRefused` (constant `reason`):
+`.potm` (`macro_enabled`; never read, never converted, and a `.pptm` is not
+converted either) and a package declaring another family's template
+(`family_mismatch`). The archive guards apply first. OpenDocument `.otp` /
+`.odp` are not handled: dark-slide has no ODF presentation reader.
+
 ## Agent tool-use surface
 
 `Agent::validateAndRepair($schema)` returns `['ok' => bool, 'schema' => array, 'errors' => list]` — wire it into your LLM tool to give the agent structured feedback on its emitted decks. Mirrors holy-sheet's pattern.

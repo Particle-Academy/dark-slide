@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace DarkSlide\Reader;
 
+use DarkSlide\Archive\OfficeTemplate;
 use DarkSlide\Archive\SourceArchive;
 use DarkSlide\Helpers\Emu;
 use HashContext;
@@ -120,11 +121,20 @@ final class PptxReader
 
         try {
             $this->currentZip = $zip;
+            // Classified first: a .potm or a cross-family declaration is refused
+            // before any part is parsed.
+            $kind = OfficeTemplate::kind($zip);
             $deck = $this->extract($zip);
             // Stamped HERE rather than inside extract() because extract() has
             // early returns for a malformed package, and an id that some return
             // paths skip is worse than one that is wrong.
             $deck['id'] = 'imported-' . $this->contentDigest($deck);
+            // After the digest, deliberately: a .potx and its .pptx twin hold
+            // the same content and so read to the same id. sourceKind says what
+            // the PACKAGE was declared as, which is not content.
+            if ($kind === OfficeTemplate::TEMPLATE) {
+                $deck['sourceKind'] = OfficeTemplate::TEMPLATE;
+            }
         } finally {
             $this->currentZip = null;
         }

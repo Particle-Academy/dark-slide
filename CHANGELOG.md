@@ -2,6 +2,33 @@
 
 ## [Unreleased]
 
+### Added
+
+- **PowerPoint `.potx` templates.** `Agent::read()` / `PptxReader::fromBytes()`
+  read one exactly as its `.pptx` twin and add `"sourceKind": "template"`. The
+  key is stamped AFTER the content digest, so a `.potx` and its `.pptx` read to
+  the same deck `id`. Presentation reads are unchanged and carry no
+  `sourceKind` key: nothing to do unless you want to tell the two apart.
+- **`Agent::convertTemplate($bytesOrPath, $to = null)`** and the
+  `vendor/bin/dark-slide template:convert <in> <out> [--to=document|template] [--force]`
+  CLI turn a `.potx` into its `.pptx` twin and back. Only the main part's
+  content-type value in `[Content_Types].xml` is rewritten; every other zip
+  member is copied as its original record, byte for byte.
+- `DarkSlide\Exceptions\OfficeTemplateRefused` with a constant `reason`.
+- OpenDocument presentations (`.otp` / `.odp`) are NOT supported: dark-slide
+  has no ODF presentation reader, so the converter refuses them as
+  `not_convertible` and reading one is unchanged.
+
+### Changed
+
+- **A macro-enabled template (`.potm`) is now refused** with
+  `OfficeTemplateRefused('macro_enabled')`; it used to be read with its VBA
+  silently ignored. So is a `.potx` carrying a `vbaProject.bin`. A `.pptm`
+  still reads as before but is never converted. Re-save a `.potm` as `.potx`.
+- A package that declares a Word or Excel template type, or a template type on
+  a part other than `/ppt/presentation.xml`, is refused with `family_mismatch`
+  instead of being read as whatever its parts looked like.
+
 ## [0.21.1] - 2026-10-26
 
 ### Security

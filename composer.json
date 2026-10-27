@@ -40,6 +40,9 @@
     "suggest": {
         "illuminate/support": "Only needed when using the optional Laravel service provider, facade, or artisan command. Compatible with 10.x through 13.x. The core DarkSlide\\Agent + writer require zero framework."
     },
+    "bin": [
+        "bin/dark-slide"
+    ],
     "autoload": {
         "psr-4": {
             "DarkSlide\\": "src/"
