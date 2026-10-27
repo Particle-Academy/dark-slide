@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-10-27
+
 ### Added
 
 - **PowerPoint `.potx` templates.** `Agent::read()` / `PptxReader::fromBytes()`
