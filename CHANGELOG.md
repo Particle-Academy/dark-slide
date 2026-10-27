@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.22.1] - 2026-10-27
+
 ### Fixed
 
 - **Markdown text now honours CommonMark backslash escapes.** In a
