@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Markdown text now honours CommonMark backslash escapes.** In a
+  `format: "markdown"` text element, a backslash before any ASCII punctuation
+  character makes that character literal and is removed, so `\*\*not bold\*\*`
+  writes the literal text `**not bold**` and `` \`not code\` `` writes a literal
+  backtick pair. Before, the backslash printed into the `.pptx` AND the
+  character still acted as a marker (an escaped asterisk opened italics, an
+  escaped backtick opened a code span). A backslash before anything else (a
+  letter, a digit, a space, non-ASCII, the end of a line) is still a literal
+  backslash, so `C:\path` is unchanged, and a backslash inside a code span is
+  always literal. `\#` and `\-` at the start of a line now write a literal `#`
+  or `-` instead of keeping the backslash. Plain-format text is unaffected.
+  Identical in dark-slide-js and fancy-dark-slide.
+  **What a consumer must do:** a deck that relied on a backslash before
+  punctuation printing literally, such as `\*` meant to show both characters,
+  now loses that backslash. Double it: `\\*` writes `\*`. Nothing else changes.
+
 ## [0.22.0] - 2026-10-27
 
 ### Added

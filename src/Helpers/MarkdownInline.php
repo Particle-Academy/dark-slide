@@ -20,6 +20,11 @@ namespace DarkSlide\Helpers;
  * Combinations are honored (`***bold italic***`, `**bold with `code` inside**`).
  * Unknown / unmatched markers fall through as literal text.
  *
+ * Backslash escapes follow CommonMark: a backslash before any ASCII
+ * punctuation character makes that character literal and is removed; a
+ * backslash before anything else is a literal backslash. Inside a code span
+ * a backslash is always literal.
+ *
  * Deliberately simple — no nested emphasis tracking beyond the bare
  * minimum the demo decks use. Block-level markdown (headings, lists,
  * blockquotes) is handled by the caller; this tokenizer only deals with
@@ -54,6 +59,19 @@ final class MarkdownInline
         while ($i < $len) {
             $c = $text[$i];
             $next2 = substr($text, $i, 2);
+
+            // CommonMark backslash escape: before ASCII punctuation the
+            // backslash is dropped and the character is literal, so it can
+            // never open or close a span. Before anything else (a letter, a
+            // digit, a space, a UTF-8 lead byte, the end of the paragraph)
+            // the backslash is itself literal and falls through below. Code
+            // spans are sliced raw further down, so nothing is an escape
+            // inside one.
+            if ($c === '\\' && $i + 1 < $len && self::isAsciiPunctuation($text[$i + 1])) {
+                $buf .= $text[$i + 1];
+                $i += 2;
+                continue;
+            }
 
             // Code spans win — they swallow markers literally.
             if ($c === '`' && !$code) {
@@ -120,6 +138,21 @@ final class MarkdownInline
         }
 
         return $runs;
+    }
+
+    /**
+     * CommonMark's ASCII punctuation set: `!` to `/`, `:` to `@`, `[` to
+     * `` ` ``, and `{` to `~`. Takes one BYTE; a UTF-8 lead or continuation
+     * byte is never in range, so a backslash before non-ASCII stays literal.
+     */
+    private static function isAsciiPunctuation(string $ch): bool
+    {
+        $o = ord($ch);
+
+        return ($o >= 33 && $o <= 47)
+            || ($o >= 58 && $o <= 64)
+            || ($o >= 91 && $o <= 96)
+            || ($o >= 123 && $o <= 126);
     }
 
     /**
