@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.22.2] - 2026-11-08
+
 ### Security
 
 - **The reader now refuses a `DOCTYPE` in every XML part of a pptx.** Most parts
