@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.7.1 — 2026-11-04
+
+A security patch on the 0.4 kit line. It carries this fix and nothing else.
+
+### Security
+- **The reader now refuses a `DOCTYPE` in every XML part of a pptx.** The parts
+  were parsed with no such check, so a crafted file could change the titles,
+  text and notes the reader returned. Every part now goes through one check.
+  **What to do:** upgrade if you read files you did not write. No code changes.
+  Real decks carry no `DOCTYPE`, so they read exactly as before. A part with one
+  is treated as if it were malformed, the handling each part has always had: a
+  refused slide keeps its place with no elements, a refused title falls back to
+  `Imported`, and refused notes are left out.
+
+### Fixed
+- `DarkSlide::VERSION` reports `0.7.1`. In 0.7.0 it still read `0.6.0`.
+
 ## v0.7.0 — 2026-06-09
 
 A "felt-while-using" follow-up surfaced by Decksmith's adoption of the 0.6 API.

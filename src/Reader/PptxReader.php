@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace DarkSlide\Reader;
 
+use DarkSlide\Archive\PartXml;
 use DarkSlide\Helpers\Emu;
 use RuntimeException;
 use SimpleXMLElement;
@@ -127,7 +128,7 @@ final class PptxReader
         if ($relsXml === '') {
             return [];
         }
-        $sx = @simplexml_load_string($relsXml);
+        $sx = PartXml::simple($relsXml);
         if ($sx === false) {
             return [];
         }
@@ -176,7 +177,7 @@ final class PptxReader
     private function extractSlideTargets(string $relsXml): array
     {
         $targets = [];
-        $xml = @simplexml_load_string($relsXml);
+        $xml = PartXml::simple($relsXml);
         if ($xml === false) {
             return [];
         }
@@ -201,7 +202,7 @@ final class PptxReader
         if ($xml === false) {
             return null;
         }
-        $sx = @simplexml_load_string($xml);
+        $sx = PartXml::simple($xml);
         if ($sx === false) {
             return null;
         }
@@ -219,7 +220,7 @@ final class PptxReader
         if ($slideRelsXml === '') {
             return null;
         }
-        $sx = @simplexml_load_string($slideRelsXml);
+        $sx = PartXml::simple($slideRelsXml);
         if ($sx === false) {
             return null;
         }
@@ -246,7 +247,7 @@ final class PptxReader
 
     private function parseNotesText(string $xml): string
     {
-        $sx = @simplexml_load_string($xml);
+        $sx = PartXml::simple($xml);
         if ($sx === false) {
             return '';
         }
@@ -273,7 +274,7 @@ final class PptxReader
             $slide['notes'] = $notes;
         }
 
-        $sx = @simplexml_load_string($xml);
+        $sx = PartXml::simple($xml);
         if ($sx === false) {
             return $slide;
         }
