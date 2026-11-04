@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace DarkSlide\Reader;
 
 use DarkSlide\Archive\OfficeTemplate;
+use DarkSlide\Archive\PartXml;
 use DarkSlide\Archive\SourceArchive;
 use DarkSlide\Helpers\Emu;
 use HashContext;
@@ -147,6 +148,14 @@ final class PptxReader
         return $zip->read($name) ?? false;
     }
 
+    /** A part read with patterns rather than parsed, which the gate still has to pass. */
+    private function readablePart(SourceArchive $zip, string $name): string|false
+    {
+        $xml = $this->part($zip, $name);
+
+        return $xml === false || PartXml::declaresDoctype($xml) ? false : $xml;
+    }
+
     /** @return array<string, mixed> */
     private function extract(SourceArchive $zip): array
     {
@@ -213,7 +222,7 @@ final class PptxReader
         if ($relsXml === '') {
             return [];
         }
-        $sx = @simplexml_load_string($relsXml);
+        $sx = PartXml::simple($relsXml);
         if ($sx === false) {
             return [];
         }
@@ -262,7 +271,7 @@ final class PptxReader
     private function extractSlideTargets(string $relsXml): array
     {
         $targets = [];
-        $xml = @simplexml_load_string($relsXml);
+        $xml = PartXml::simple($relsXml);
         if ($xml === false) {
             return [];
         }
@@ -290,7 +299,7 @@ final class PptxReader
      */
     private function readMonoTypeface(SourceArchive $zip): string
     {
-        $xml = $this->part($zip, 'ppt/theme/theme1.xml');
+        $xml = $this->readablePart($zip, 'ppt/theme/theme1.xml');
         if ($xml === false) {
             return '';
         }
@@ -314,7 +323,7 @@ final class PptxReader
     private function readTheme(SourceArchive $zip): array
     {
         $xml = $this->part($zip, 'ppt/theme/theme1.xml');
-        $sx = $xml === false || stripos($xml, '<!DOCTYPE') !== false ? false : @simplexml_load_string($xml);
+        $sx = $xml === false ? false : PartXml::simple($xml);
         if ($sx === false) {
             return [];
         }
@@ -543,7 +552,7 @@ final class PptxReader
         $this->slideWidthEmu = Emu::DEFAULT_SLIDE_WIDTH;
         $this->slideHeightEmu = Emu::DEFAULT_SLIDE_HEIGHT;
 
-        $xml = $this->part($zip, 'ppt/presentation.xml');
+        $xml = $this->readablePart($zip, 'ppt/presentation.xml');
         if ($xml === false || ! preg_match('/<p:sldSz\b[^>]*>/', $xml, $tag)) {
             return;
         }
@@ -576,7 +585,7 @@ final class PptxReader
      */
     private function readEmbeddedFonts(SourceArchive $zip): array
     {
-        $xml = $this->part($zip, 'ppt/presentation.xml');
+        $xml = $this->readablePart($zip, 'ppt/presentation.xml');
         if ($xml === false || ! preg_match('/<p:embeddedFontLst>(.*?)<\/p:embeddedFontLst>/s', $xml, $list)) {
             return [];
         }
@@ -603,7 +612,7 @@ final class PptxReader
         if ($xml === false) {
             return null;
         }
-        $sx = @simplexml_load_string($xml);
+        $sx = PartXml::simple($xml);
         if ($sx === false) {
             return null;
         }
@@ -621,7 +630,7 @@ final class PptxReader
         if ($slideRelsXml === '') {
             return null;
         }
-        $sx = @simplexml_load_string($slideRelsXml);
+        $sx = PartXml::simple($slideRelsXml);
         if ($sx === false) {
             return null;
         }
@@ -648,7 +657,7 @@ final class PptxReader
 
     private function parseNotesText(string $xml): string
     {
-        $sx = @simplexml_load_string($xml);
+        $sx = PartXml::simple($xml);
         if ($sx === false) {
             return '';
         }
@@ -675,7 +684,7 @@ final class PptxReader
             $slide['notes'] = $notes;
         }
 
-        $sx = @simplexml_load_string($xml);
+        $sx = PartXml::simple($xml);
         if ($sx === false) {
             return $slide;
         }
@@ -1295,7 +1304,7 @@ final class PptxReader
         $rid = $ref === null ? '' : (string) ($ref->attributes(self::NS_R)['id'] ?? '');
         $target = $this->currentSlideRels[$rid]['target'] ?? null;
         $xml = $target !== null && $this->currentZip !== null ? $this->part($this->currentZip, $target) : false;
-        $sx = $xml === false || stripos($xml, '<!DOCTYPE') !== false ? false : @simplexml_load_string($xml);
+        $sx = $xml === false ? false : PartXml::simple($xml);
         if ($sx === false) {
             return null;
         }

@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+### Security
+
+- **The reader now refuses a `DOCTYPE` in every XML part of a pptx.** Most parts
+  were parsed with no such check, so a crafted file could define its own entities
+  and have them expanded into the text the reader returned. The checks that
+  already existed now use the same gate, because they did not hold in every case.
+  No file contents were reachable this way and no external file was loaded.
+  **What to do:** upgrade if you read files you did not write. No code changes.
+  Real decks carry no `DOCTYPE`, so they read as before. A part with one is read
+  as absent, the handling each has always had for a part it cannot parse: a
+  refused slide comes back with no elements, a refused chart is dropped, and a
+  refused `docProps/core.xml` gives the default title.
+- **A package whose `[Content_Types].xml` carries a `DOCTYPE` is now refused.**
+  It was treated as declaring nothing, so the checks that depend on what a
+  package declares did not run on it. Reading or converting one now throws
+  `ArchiveRefused` with reason `archive_unsupported`.
+  **What to do:** nothing, unless you read decks without catching
+  `RuntimeException`, which `ArchiveRefused` extends.
+
+### Fixed
+
+- **Text that only looks like a `DOCTYPE` no longer loses a chart.** A chart title
+  whose CDATA holds an HTML page dropped the whole chart. It now reads.
+
 ## [0.22.1] - 2026-10-27
 
 ### Fixed

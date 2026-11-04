@@ -36,7 +36,16 @@ both run THIS package as a subprocess and compare every part. So:
 - **A change here breaks two other repos** until they are ported. Land all
   three, or land none.
 - The reader is different: nothing is serialised on the read side, so
-  `Reader\PptxReader` uses SimpleXML freely.
+  `Reader\PptxReader` uses SimpleXML freely, through `Archive\PartXml`.
+- **Every XML part is parsed through `Archive\PartXml`, which refuses a
+  `DOCTYPE`.** A presentation part never carries one, and an internal DTD subset
+  is the entry point for entity expansion. A refusal looks like malformed XML, so
+  each caller keeps its own handling of a part it cannot read. A part read with
+  patterns rather than parsed goes through `readablePart()`, for the same reason.
+  The exception is `[Content_Types].xml`, whose declarations decide which other
+  refusals apply: a `DOCTYPE` there refuses the package with `ArchiveRefused`. A
+  test fails if `src/` parses XML anywhere else. Don't replace this with a search
+  of the bytes: `DoctypeRefusalTest` holds the cases.
 - **`read()` is a PURE function of its bytes**, and that is a contract rather
   than an observation. The same package read twice — in the same second or a
   year apart, on any machine — returns an identical structure, down to every

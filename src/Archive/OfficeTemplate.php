@@ -6,6 +6,7 @@ namespace DarkSlide\Archive;
 
 use DOMDocument;
 use DOMElement;
+use DarkSlide\Exceptions\ArchiveRefused;
 use DarkSlide\Exceptions\OfficeTemplateRefused;
 use LogicException;
 
@@ -93,11 +94,18 @@ final class OfficeTemplate
      * exactly as before this class existed: only templates are new.
      *
      * @throws OfficeTemplateRefused `macro_enabled` or `family_mismatch`
+     * @throws ArchiveRefused `archive_unsupported` for a declaration carrying a DOCTYPE
      */
     public static function kind(SourceArchive $zip): string
     {
         $types = $zip->read('[Content_Types].xml');
         if ($types !== null) {
+            // Reading this as merely unparsable would make the package a plain
+            // document, and every declaration in it would go unchecked.
+            if (PartXml::declaresDoctype($types)) {
+                throw new ArchiveRefused('archive_unsupported');
+            }
+
             return self::ooxmlKind($zip, $types);
         }
         // Without an ODF reader an OpenDocument package is not classified at
@@ -432,16 +440,7 @@ final class OfficeTemplate
 
     private static function dom(?string $xml): ?DOMDocument
     {
-        if ($xml === null || $xml === '') {
-            return null;
-        }
-        $dom = new DOMDocument();
-        $prev = libxml_use_internal_errors(true);
-        $loaded = $dom->loadXML($xml, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING);
-        libxml_clear_errors();
-        libxml_use_internal_errors($prev);
-
-        return $loaded && $dom->doctype === null ? $dom : null;
+        return PartXml::dom($xml);
     }
 
     private static function firstByLocalName(DOMDocument $dom, string $local): ?DOMElement
