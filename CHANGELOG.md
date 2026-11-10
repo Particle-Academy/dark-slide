@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.22.3] - 2026-11-10
+
 ### Changed
 
 - **The agent guide (`Agent::guide()`) catches up with 0.20 to 0.22.** It was
