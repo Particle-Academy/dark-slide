@@ -21,7 +21,9 @@ with the package's JSON schema (`Agent::jsonSchema()` / `Agent.jsonSchema()` / `
    For a deck, also run `Agent::lint` (PHP), `Agent.lint` (Node) or `lint` (Python): it names text that will
    overflow its box, overlaps, off-slide boxes, KPI values too wide for their
    cells, text too small to read, and markdown that will print as typed.
-   Fix every finding.
+   Fix every finding. `Agent::validateAndRepair` / `Agent.validateAndRepair` /
+   `validate_and_repair` fixes loose input it can (it returns `{ok, schema, errors}`);
+   when `ok` is false, fix the `errors` it names yourself, not the whole deck.
 4. Write it (`Agent::write` / `Agent.toBytes` / `to_bytes`). If you can render the file and look at it, do,
    but repair only what you can see is wrong: one-shot "improvements" made
    blind regressed more documents than they fixed.
@@ -108,7 +110,9 @@ Type scale (px -> pt): display 150-180 -> 56-68pt (title slide only); slide titl
   figure ("41% cited X") -- state it as a big number instead.
 - MARKDOWN NEEDS `format:"markdown"`. Any `**bold**` lead-in or `# heading` in
   `content` prints its asterisks as typed unless the element has
-  `format:"markdown"`. The layout check names it (`literal-markdown`).
+  `format:"markdown"`. The layout check names it (`literal-markdown`). To print a
+  marker literally in markdown text, escape it with a backslash: `\*\*` prints
+  `**`, `` \` `` prints a backtick (a backslash before a letter or digit stays).
 - A SCORECARD SHOWS HIT AND MISS AT A GLANCE. A kpiBand colours every value alike,
   so for KPIs against targets use one card per KPI (a text box with `style.fill`
   surface and `style.accentBar` in green `#16A34A` for met, red `#DC2626` for missed),
@@ -175,6 +179,36 @@ Type scale (px -> pt): display 150-180 -> 56-68pt (title slide only); slide titl
   counts words, so run it and fix every finding before anything else.
 - Timeline milestones evenly spaced when the dates are not. -> Place each milestone
   at x proportional to its date between the first and the last.
+
+## Reading and editing an existing deck
+
+- **Read it back to JSON.** `Agent::read($path)` (PHP takes a path),
+  `Agent.read(bytes)` / `Agent.fromBytes(bytes)` (Node), `read(data)` / `from_bytes`
+  (Python). Text, images, shapes, the theme, native charts (as the `option` that
+  writes them) and tables with their styling (`style.header`, `style.stripe`, a
+  cell object only where it differs) come back; masters, transitions, animations,
+  table borders and merged cells do not. The same file always reads to the same
+  deck, ids included, so two reads can be compared.
+- **Edit what you read, then write it again.** Change only the slides and
+  elements the task is about; writing an unchanged read reproduces the slide.
+- **A summary, not the JSON:** `Agent::describe($deck)` returns plain text
+  (title, theme, slide count, elements by type). Use it to orient before reading
+  the whole deck into context.
+- **Templates.** A `.potx` reads like a `.pptx` plus `"sourceKind": "template"`.
+  `Agent::convertTemplate($bytesOrPath, $to = null)` / `Agent.convertTemplate` /
+  `convert_template` turns a template into a deck and back (`to`: `document`,
+  `template`, or null to flip). Macro-enabled files (`.potm`, `.pptm`) and
+  OpenDocument presentations are refused, never converted.
+- **Refusals are final.** A file with a `DOCTYPE`, unsafe zip entries or an
+  expansion past the archive limits throws `ArchiveRefused`. Report it; do not
+  retry or try to repair the file.
+- **Ops (PHP only).** `Agent::diff($a, $b)` returns the DeckOps that turn `$a`
+  into `$b` (`reduce($a, diff($a, $b))` equals `$b`); `Agent::reduce($deck,
+  $opOrOps)` applies one op or a list; `Agent::opSchema()` is the JSON Schema of
+  one op, to register as a tool or check ops on the wire. To change one element,
+  emit its op rather than a whole new deck.
+- **Streaming (PHP only).** `Agent::toStream($deck, $options)` returns a readable
+  stream resource with the same validation as `toBytes`, for a streamed response.
 
 ## Before you write the deck, check
 

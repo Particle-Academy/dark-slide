@@ -9,7 +9,7 @@ declare(strict_types=1);
  * fails a build instead of telling a model one thing in PHP and another in
  * Node. Edit all three copies, then all three constants.
  */
-const AGENT_GUIDE_SHA256 = '48f3697a2c9705e2c78d52948b7bf16431df0fc29d618b1e1c71ded11902e466';
+const AGENT_GUIDE_SHA256 = 'f84b567dfaf8ffacb166a7fde593722826f61eaa36fa5826d279d87bc4525324';
 
 it('returns the guide, and it is the shared one', function () {
     $guide = DarkSlide\Agent::guide();

@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **The agent guide (`Agent::guide()`) catches up with 0.20 to 0.22.** It was
+  last touched at 0.19.0. New: a "Reading and editing an existing deck" section
+  (`read`, charts and styled tables coming back, `describe`, `.potx` templates
+  and `convertTemplate`, `ArchiveRefused` as final, `diff` / `reduce` /
+  `opSchema`, `toStream`), `validateAndRepair` in the build loop, and markdown
+  backslash escapes. Byte-identical in dark-slide-js and fancy-dark-slide (new
+  SHA-256 in all three). **What to do:** nothing; guide text only, a patch.
+- Dev only: `AgentGuideCoversTheApiTest` fails when a public `Agent` method is
+  not named in the guide and not on its allowlist (each entry carries a
+  reason). `phpunit.xml` now forces sqlite `:memory:`, env and server.
+
 ## [0.22.2] - 2026-11-04
 
 ### Security

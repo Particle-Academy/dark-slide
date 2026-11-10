@@ -290,6 +290,17 @@ It draws the split rule and both cell texts. The construction is spec-correct an
 is what PowerPoint expects, but it cannot be verified by rendering in Impress, so
 nothing in the reference deck depends on merging for its look.
 
+## The agent guide is shipped surface
+
+`agent-guide/professional-decks.md` is what `Agent::guide()` returns and what a
+model builds from, so it is part of the API. Release checklist:
+
+- [ ] guide reviewed against this release's CHANGELOG
+
+`AgentGuideCoversTheApiTest` fails on a public `Agent` method the guide never
+names; it cannot tell whether a new option or behaviour is described, which is
+what the review is for. Edit all three copies, then all three hash constants.
+
 ## Testing
 
 ```bash
