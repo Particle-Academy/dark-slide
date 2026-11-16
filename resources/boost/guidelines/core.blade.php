@@ -31,14 +31,14 @@ use DarkSlide\Agent;
 
 $deck = [
     'id'    => 'fancy-ui-pitch',
-    'title' => 'Fancy UI Kit',
+    'title' => 'Fancy Dev Kit',
     'theme' => ['name' => 'default'],
     'slides' => [
         [
             'id' => 'cover',
             'elements' => [
                 ['type' => 'text', 'x' => 0.1, 'y' => 0.4, 'w' => 0.8, 'h' => 0.2,
-                 'content' => '# Fancy UI Kit',
+                 'content' => '# Fancy Dev Kit',
                  'format' => 'markdown'],
                 ['type' => 'text', 'x' => 0.1, 'y' => 0.65, 'w' => 0.8, 'h' => 0.1,
                  'content' => 'Composable primitives for humans and agents',

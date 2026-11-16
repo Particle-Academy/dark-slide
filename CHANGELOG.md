@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Rebranded the display name to Fancy Dev Kit (README and package description). Package names, the npm scope, URLs and the `fancy-ui` MCP id are unchanged.
+
 ## [0.22.3] - 2026-11-10
 
 ### Changed
