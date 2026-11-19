@@ -4,7 +4,7 @@
 
 ### Features
 
-- **Framework-agnostic core**: Pure PHP, no Laravel dependency. Optional `DarkSlideServiceProvider` for Laravel 10-13.
+- **Framework-agnostic core**: Pure PHP, no Laravel dependency. Optional `DarkSlideServiceProvider` for Laravel 13.
 - **Agent-shaped API**: `DarkSlide\Agent` is a single static class — `validate`, `validateAndRepair`, `write`, `toBytes`, `read`, `describe`, `jsonSchema`. No DI container required.
 - **JSON Schema export**: `Agent::jsonSchema()` returns the schema for the `$deck` shape — feed directly into LLM tool registration so the agent emits valid decks the first time.
 - **Round-trip read/write**: `Agent::read($path)` extracts a deck from a `.pptx` back into the same JSON shape `Agent::write()` accepts. High fidelity for files this package wrote; hand-authored PowerPoint decks drop styling the schema can't represent.
@@ -127,7 +127,7 @@ return response($pptxBytes, 200, [
 
 ### Laravel integration (optional)
 
-The `DarkSlideServiceProvider` auto-discovers under Laravel 10-13. Binds `DarkSlide` into the container under `dark-slide`. No config publishing required by default.
+The `DarkSlideServiceProvider` auto-discovers under Laravel 13 (the minimum; older Laravel is refused by a composer `conflict`). Binds `DarkSlide` into the container under `dark-slide`. No config publishing required by default.
 
 <code-snippet name="Dark Slide — Laravel usage" lang="php">
 $result = \DarkSlide\Agent::write($deck, storage_path('app/deck.pptx'));
