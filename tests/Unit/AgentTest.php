@@ -178,7 +178,7 @@ it('round-trips a deck through write → read', function () {
         expect(count($read['slides']))->toBe(2);
         // First slide should preserve the text content.
         $first = $read['slides'][0];
-        expect(collect($first['elements'])->pluck('content'))->toContain('Hello, DarkSlide.');
+        expect(array_column($first['elements'], 'content'))->toContain('Hello, DarkSlide.');
         expect($first['notes'])->toContain('speaker notes');
     } finally {
         @unlink($path);
@@ -423,10 +423,10 @@ it('round-trips a table through write → read', function () {
     try {
         Agent::write($deck, $path);
         $read = Agent::read($path);
-        $tables = collect($read['slides'][1]['elements'])->where('type', 'table')->values();
-        expect($tables->count())->toBe(1);
-        $t = $tables->first();
-        expect(collect($t['columns'])->pluck('label')->all())->toBe(['Name', 'Qty']);
+        $tables = array_values(array_filter($read['slides'][1]['elements'], fn ($e) => ($e['type'] ?? null) === 'table'));
+        expect(count($tables))->toBe(1);
+        $t = $tables[0];
+        expect(array_column($t['columns'], 'label'))->toBe(['Name', 'Qty']);
         expect(count($t['rows']))->toBe(2);
         // Column keys are normalized to col1, col2 on read (we don't carry
         // the source schema). Verify by position-of-value instead.
@@ -477,9 +477,9 @@ it('round-trips an embedded image as a data URI', function () {
     try {
         Agent::write($deck, $path);
         $read = Agent::read($path);
-        $images = collect($read['slides'][0]['elements'])->where('type', 'image')->values();
-        expect($images->count())->toBe(1);
-        $src = $images->first()['src'];
+        $images = array_values(array_filter($read['slides'][0]['elements'], fn ($e) => ($e['type'] ?? null) === 'image'));
+        expect(count($images))->toBe(1);
+        $src = $images[0]['src'];
         expect($src)->toStartWith('data:image/png;base64,');
         expect(strlen($src))->toBeGreaterThan(100);
     } finally {
@@ -500,7 +500,7 @@ it('round-trips inline markdown spans through write → read', function () {
     try {
         Agent::write($deck, $path);
         $read = Agent::read($path);
-        $first = collect($read['slides'][0]['elements'])->where('type', 'text')->first();
+        $first = array_values(array_filter($read['slides'][0]['elements'], fn ($e) => ($e['type'] ?? null) === 'text'))[0] ?? null;
         expect($first['format'])->toBe('markdown');
         expect($first['content'])->toContain('**bold**');
         expect($first['content'])->toContain('*italic*');
